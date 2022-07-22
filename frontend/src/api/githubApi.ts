@@ -5,6 +5,7 @@ import {
   GitHubRepoPermissions,
   GitHubHTTPResponse,
 } from '../model/github';
+import { getGitHubOAuthURL } from './api';
 
 export const requestGitHub = async <T>(params: RequestParams) => {
   // if token exists, add token to headers
@@ -23,11 +24,6 @@ export const requestGitHub = async <T>(params: RequestParams) => {
 };
 
 /** redirect to gh oauth login */
-const gitHubOAuthLogin = async () => {
-  return await asyncRequest<string>({
-    url: '/api/user/github/login',
-  });
-};
 
 export const gitHubLogin = () => {
   const { hasLogin, name } = userInfo();
@@ -35,7 +31,7 @@ export const gitHubLogin = () => {
     window.location.reload();
     return;
   }
-  gitHubOAuthLogin().then((url) => {
+  getGitHubOAuthURL().then((url) => {
     if (url) {
       window.location.assign(url);
     }

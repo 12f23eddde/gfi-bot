@@ -245,3 +245,9 @@ export const updateRepoConfig = async (
     data: config,
   });
 };
+
+export const getGitHubOAuthURL = async () => {
+  return await requestGFI<string>({
+    url: '/api/user/github/login',
+  });
+}
