@@ -241,12 +241,18 @@ def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False)
     )
 
     # 0. set state
-    q = GfiQueries.objects(Q(name=name) & Q(owner=owner)).first()
+    # q = GfiQueries.objects(Q(name=name) & Q(owner=owner)).first()
+    q = GfibotRepo.objects(Q(name=name) & Q(owner=owner)).first()
     if q:
-        if q.is_updating:
-            logger.info("{}/{} is already updating.".format(owner, name))
+        # if q.is_updating:
+        #     logger.info("{}/{} is already updating.".format(owner, name))
+        #     return
+        # q.update(is_updating=True, is_finished=False)
+
+        if q.state in ["collecting", "trainging"]:
+            logger.info("%s/%s is already updating: %s", owner, name, q.state)
             return
-        q.update(is_updating=True, is_finished=False)
+        q.update(state="collecting")
 
     try:
         # 1. fetch repo data
@@ -266,6 +272,7 @@ def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False)
         # 2. rebuild repo dataset
         begin_datetime = datetime(2008, 1, 1)
         get_dataset_for_repo(owner=owner, name=name, since=begin_datetime)
+        q.update(state="training")
 
         # 3. update training summary
         # 4. update gfi prediction
@@ -276,10 +283,13 @@ def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False)
             "Update done for " + owner + "/" + name + " at {}.".format(datetime.now())
         )
 
+        q.update(state="done")
+
     # 6. set state
-    finally:
-        if q:
-            q.update(is_updating=False, is_finished=True, is_pending=False)
+    except Exception as e:
+        logger.error("Error updating %s/%s: %s", owner, name, e)
+        q.update(state="error")
+        raise e
 
 
 def start_scheduler() -> BackgroundScheduler:

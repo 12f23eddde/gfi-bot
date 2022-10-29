@@ -3,6 +3,80 @@ from datetime import datetime
 from mongoengine import *
 
 
+class GfibotToken(Document):
+    """Github App Tokens"""
+
+    app_name = StringField(required=True)
+    client_id = StringField(required=True)
+    client_secret = StringField(required=True)
+    token = StringField(required=True)
+
+    meta = {
+        "indexes": [
+            {"fields": ["client_id"], "unique": True},
+            {"fields": ["app_name"], "unique": True},
+        ]
+    }
+
+
+class GfibotRepo(Document):
+    """Repos added to Gfibot"""
+
+    class GfibotRepoConfig(EmbeddedDocument):
+        """Config for a repo"""
+
+        update_cron = StringField(default="0 0 * * *")
+        newcomer_threshold: int = IntField(
+            required=True, min_value=0, max_value=5, default=5
+        )
+        gfi_threshold: float = FloatField(
+            required=True, min_value=0.0, max_value=1, default=0.5
+        )
+        need_comment: bool = BooleanField(required=True, default=True)
+        auto_label: bool = BooleanField(required=True, default=False)
+        issue_label: str = StringField(required=True, default="good first issue")
+
+    name: str = StringField(required=True)
+    owner: str = StringField(required=True)
+    state: str = StringField(
+        required=True, choices=["done", "collecting", "training", "error"]
+    )
+
+    # login of the user who added the repo
+    added_by: str = StringField(required=False)
+    config: GfibotRepoConfig = EmbeddedDocumentField(GfibotRepoConfig)
+    _added_at: datetime = DateTimeField(required=True, default=datetime.utcnow)
+    _updated_at: datetime = DateTimeField(required=True, default=datetime.utcnow)
+
+
+class GfibotUser(Document):
+    """Registered Users"""
+
+    login: str = StringField(required=True)
+    oauth_token: str = StringField(required=True)
+    app_token: str = StringField(required=True)
+
+    meta = {
+        "indexes": [
+            {"fields": ["#login"], "unique": True},
+        ]
+    }
+
+
+class GfibotSearch(Document):
+    login: str = StringField(required=True)
+    name: str = StringField(required=True)
+    owner: str = StringField(required=True)
+    _searched_at: datetime = DateTimeField(required=True, default=datetime.utcnow)
+
+    meta = {
+        "indexes": [
+            {"fields": ["#login"], "unique": True},
+            "-_searched_at",
+        ]
+    }
+
+
 class GithubTokens(Document):
     """GitHub tokens for GitHub App"""
 
@@ -15,7 +89,7 @@ class GithubTokens(Document):
     meta = {
         "indexes": [
             {"fields": ["client_id"], "unique": True},
-            {"fields": ["app_name"], "unique": True},
+            {"fields": ["#app_name"], "unique": True},
         ]
     }
 
