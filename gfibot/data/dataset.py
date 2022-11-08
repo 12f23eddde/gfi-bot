@@ -183,7 +183,11 @@ def _get_user_data(
             owner=owner,
             name=name,
             number__in=[
-                i.number for i in usriss if i.state == "closed" and i.closed_at <= t
+                i.number
+                for i in usriss
+                if i.state == "closed"
+                and i.closed_at
+                < t  # issues should be closed before t (to prevent data leakage)
             ],
         )
     )
@@ -201,10 +205,12 @@ def _get_user_data(
             return feat
 
         user: User = query.first()
-        commits = [c for c in user.commit_contributions if c.created_at <= t]
-        issues = [i for i in user.issues if i.created_at <= t]
-        pulls = [p for p in user.pulls if p.created_at <= t]
-        reviews = [r for r in user.pull_reviews if r.created_at <= t]
+        commits = [
+            c for c in user.commit_contributions if c.created_at < t
+        ]  # < to prevent data leakage
+        issues = [i for i in user.issues if i.created_at < t]
+        pulls = [p for p in user.pulls if p.created_at < t]
+        reviews = [r for r in user.pull_reviews if r.created_at < t]
         feat.n_commits_all = sum(c.commit_count for c in commits)
         feat.n_issues_all = len(issues)
         feat.n_pulls_all = len(pulls)

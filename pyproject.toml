@@ -161,11 +161,9 @@ gunicorn = "^20.1.0"
 # Scheduler
 gevent = "^21.12.0"
 APScheduler = "^3.9.1"
-# the official psutil wheel won't compile on armv8 :(
-psutil = [
-    {version="^5.9.1", markers="platform_machine!='aarch64'"},
-    {url="https://github.com/ddelange/psutil/releases/download/release-5.9.1/psutil-5.9.1-cp36-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", markers="platform_machine=='aarch64'"},
-    ]
+psutil = "^5.9.3"
+PyJWT = {extras = ["crypto"], version = "^2.6.0"}
+orjson = "^3.8.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2"

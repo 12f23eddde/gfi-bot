@@ -1,8 +1,4 @@
-{
-	auto_https disable_redirects
-}
-
-:80 {
+gfibot.io {
 	@backend path /api/* /docs /redoc /openapi.json
 	route {
 		reverse_proxy @backend http://host.docker.internal:{$GFIBOT_BACKEND_PORT} {

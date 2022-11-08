@@ -1,196 +1,207 @@
-from typing import List, Optional
+import logging
+from typing import Any, Optional, List
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Depends, Path, Header
 from pydantic import BaseModel
 
-from gfibot.collections import *
 from gfibot.backend.models import (
     GFIResponse,
-    RepoBrief,
-    RepoQuery,
-    RepoSort,
-    RepoConfig,
+    UserRepo,
+    UserRepoConfig,
     UserSearchedRepo,
 )
-from gfibot.backend.routes.github import redirect_from_github, get_oauth_app_login_url
-from gfibot.backend.background_tasks import has_write_access, remove_repo_from_gfibot
+from gfibot.collections import GfibotRepo, GfibotUser, GfibotSearch
+from gfibot.backend.background_tasks import (
+    add_repo_to_gfibot,
+    remove_repo_from_gfibot,
+    schedule_repo_update_now,
+    schedule_tag_task_now,
+    recommend_repo_config,
+)
+from gfibot.backend.auth import check_token_headers, check_write_access_headers
 
 api = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# may move these paths to github.py?
-@api.get("/github/login")
-def github_login():
+@api.get(
+    "/repos",
+    response_model=GFIResponse[List[UserRepo]],
+    dependencies=[Depends(check_token_headers)],
+)
+def get_user_repo_list(x_github_user: str = Header()):
     """
-    Redirect to GitHub OAuth login page
+    Get repo config
     """
-    return get_oauth_app_login_url()
+    user = x_github_user
+    if not user:
+        raise HTTPException(403, "Check X-Github-User header")
+    repos = list(GfibotRepo.objects(added_by=user).only(*UserRepo.__fields__))
+    return GFIResponse(result=repos)
 
 
-@api.get("/github/callback")
-def github_callback(code: str):
+@api.post(
+    "/repos/{owner}/{name}",
+    response_model=GFIResponse[str],
+    dependencies=[Depends(check_write_access_headers)],
+)
+def add_repo(owner: str, name: str, x_github_user: str = Header()):
     """
-    Redirect from GitHub OAuth callback page
+    Add repository to GFI-Bot
     """
-    return redirect_from_github(code, redirect_from="github_oauth_callback")
-
-
-class UserQueryModel(BaseModel):
-    nums: int
-    queries: List[RepoBrief]
-    finished_queries: List[RepoBrief]
-
-
-@api.get("/queries", response_model=GFIResponse[UserQueryModel])
-def get_user_queries(user: str, filter: Optional[RepoSort] = None):
-    user_record: GfiUsers = (
-        GfiUsers.objects(github_login=user).only("user_queries").first()
-    )
-    if not user_record:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    RANK_THRESHOLD = 3  # newcomer_thres used for ranking repos
-    q = TrainingSummary.objects(threshold=RANK_THRESHOLD).filter(
-        owner__ne=""
-    )  # "": global perf metrics
-    repo_names = [repo.repo for repo in user_record.user_queries]
-    repo_owners = [repo.owner for repo in user_record.user_queries]
-    q = q.filter(name__in=repo_names, owner__in=repo_owners)
-
-    if filter:
-        if filter == RepoSort.GFIS:
-            q = q.order_by("-n_gfis")
-        elif filter == RepoSort.ISSUE_CLOSE_TIME:
-            q = q.order_by("-issue_close_time")
-        elif filter == RepoSort.NEWCOMER_RESOLVE_RATE:
-            q = q.order_by("-r_newcomer_resolve")
-        elif filter == RepoSort.STARS:
-            q = q.order_by("-n_stars")
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid filter: expect one in {}".format(RepoSort.__members__),
-            )
+    user = x_github_user
+    gfi_repo: Optional[GfibotRepo] = GfibotRepo.objects(name=name, owner=owner).first()
+    if not gfi_repo:
+        add_repo_to_gfibot(owner=owner, name=name, user=user)
+        return GFIResponse(result="Repository added")
+    elif gfi_repo.state == "done":
+        return GFIResponse(result="Repository already exists")
     else:
-        q = q.order_by("name")
-
-    repos_list = [(repo.owner, repo.name) for repo in q.only(*RepoQuery.__fields__)]
-    for repo_q in user_record.user_queries:  # not been trained yet
-        if (repo_q.owner, repo_q.repo) not in repos_list:
-            repos_list.append((repo_q.owner, repo_q.repo))
-    pending_queries = []
-    finished_queries = []
-    for owner, name in repos_list:
-        repo_q: GfiQueries = (
-            GfiQueries.objects(name=name, owner=owner)
-            .only(*RepoQuery.__fields__)
-            .first()
-        )
-        if repo_q:
-            if repo_q.is_pending:
-                repo_i: Optional[RepoBrief] = (
-                    Repo.objects(name=name, owner=owner)
-                    .only(*RepoBrief.__fields__)
-                    .first()
-                )
-                if repo_i:
-                    pending_queries.append(RepoBrief(**repo_i.to_mongo()))
-            else:
-                repo_i: Optional[RepoBrief] = (
-                    Repo.objects(name=name, owner=owner)
-                    .only(*RepoBrief.__fields__)
-                    .first()
-                )
-                if repo_i:
-                    finished_queries.append(RepoBrief(**repo_i.to_mongo()))
-
-    return GFIResponse(
-        result=UserQueryModel(
-            nums=len(pending_queries) + len(finished_queries),
-            queries=pending_queries,
-            finished_queries=finished_queries,
-        )
-    )
+        return GFIResponse(result="Repository is being processed by GFI-Bot")
 
 
-# TODO:R RepoQuery not right
-@api.delete("/queries", response_model=GFIResponse[str])
-def delete_user_queries(name: str, owner: str, user: str):
-    if not has_write_access(owner=owner, name=name, user=user):
-        raise HTTPException(
-            status_code=403, detail="You don't have write access to this repo"
-        )
-
-    user_q = (
-        GfiUsers.objects(github_login=user)
-        .only("user_queries")
-        .filter(user_queries__repo=name, user_queries__owner=owner)
-        .first()
-    )
-    if not user_q or not user_q.user_queries:
-        raise HTTPException(status_code=404, detail="User query not found")
-
-    remove_repo_from_gfibot(name=name, owner=owner, user=user)
-
-    return GFIResponse(result="Query deleted")
+@api.delete(
+    "/repos/{owner}/{name}",
+    response_model=GFIResponse[str],
+    dependencies=[Depends(check_write_access_headers)],
+)
+def delete_user_repo(owner: str, name: str, x_github_user: str = Header()):
+    """
+    Deletes repository from GFI-Bot
+    """
+    user = x_github_user
+    gfi_repo: Optional[GfibotRepo] = GfibotRepo.objects(name=name, owner=owner).first()
+    if not gfi_repo:
+        raise HTTPException(404, f"Repository {owner}/{name} does not exist")
+    remove_repo_from_gfibot(owner=owner, name=name, user=user)
+    return GFIResponse(result=f"Repository {owner}/{name} removed from GFI-Bot")
 
 
-@api.get("/queries/config", response_model=GFIResponse[RepoConfig])
-def get_user_queries_config(name: str, owner: str):
-    repo_q = GfiQueries.objects(Q(name=name, owner=owner)).first()
-    if not repo_q:
-        raise HTTPException(status_code=404, detail="Repository not found")
-    return GFIResponse(result=RepoConfig(**repo_q.repo_config.to_mongo()))
+@api.get(
+    "/repos/{owner}/{name}/config",
+    response_model=GFIResponse[UserRepoConfig],
+    dependencies=[Depends(check_write_access_headers)],
+)
+def get_user_repo_config(owner: str, name: str):
+    """
+    Get user repository config
+    """
+    gfi_repo: Optional[GfibotRepo] = GfibotRepo.objects(name=name, owner=owner).first()
+    if not gfi_repo:
+        raise HTTPException(404, f"Repository {owner}/{name} does not exist")
+    return GFIResponse(result=gfi_repo.config)
 
 
-@api.put("/queries/config", response_model=GFIResponse[str])
-def update_user_queries_config(
-    repo_config: RepoConfig, name: str, owner: str, user: str
+@api.get(
+    "/repos/{owner}/{name}/config/recommended",
+    response_model=GFIResponse[UserRepoConfig],
+    dependencies=[Depends(check_write_access_headers)],
+)
+def recommened_user_repo_config(
+    owner: str,
+    name: str,
+    newcomer_percentage: Optional[int] = None,
+    gfi_percentage: Optional[int] = None,
 ):
-    if not has_write_access(owner, name, user):
-        raise HTTPException(
-            status_code=403, detail="You don't have write access to this repository"
-        )
-    repo_q = GfiQueries.objects(Q(name=name, owner=owner)).first()
-    if not repo_q:
-        raise HTTPException(status_code=404, detail="Repository not found")
-    repo_q.update(repo_config=dict(repo_config))
-    return GFIResponse(result="success")
-
-
-@api.get("/searches", response_model=GFIResponse[List[UserSearchedRepo]])
-def get_user_searches(user: str):
-    user_record = GfiUsers.objects(github_login=user).only("user_searches").first()
-    if not user_record:
-        raise HTTPException(status_code=404, detail="User not found")
-    searched_repos = [
-        UserSearchedRepo(**repo.to_mongo(), name=repo.repo)
-        for repo in user_record.user_searches
-    ]
-    return GFIResponse(result=searched_repos)
-
-
-@api.delete("/searches", response_model=GFIResponse[List[UserSearchedRepo]])
-def delete_user_searches(user: str, id: Optional[int] = None):
-    user_record: GfiUsers = (
-        GfiUsers.objects(github_login=user).only("user_searches").first()
+    """
+    Get recommended user repository config
+    """
+    rec = recommend_repo_config(
+        owner=owner,
+        name=name,
+        newcomer_percentage=newcomer_percentage,
+        gfi_percentage=gfi_percentage,
     )
-    if not user_record:
-        raise HTTPException(status_code=404, detail="User not found")
-    if id is not None:
-        # delete where increment == id
-        # seems to be a bug in mongoengine: https://stackoverflow.com/questions/32301142
-        GfiUsers.objects(github_login=user).update_one(
-            __raw__={"$pull": {"user_searches": {"increment": int(id)}}}
-        )
-    else:
-        # delete all user searches
-        GfiUsers.objects(github_login=user).update_one(
-            __raw__={"$set": {"user_searches": []}}
-        )
-    searched_repos = [
-        UserSearchedRepo(**repo.to_mongo(), name=repo.repo)
-        for repo in user_record.user_searches
-    ]
-    return GFIResponse(result=searched_repos)
+    return GFIResponse(result=rec)
+
+
+@api.put(
+    "/repos/{owner}/{name}/config",
+    response_model=GFIResponse[str],
+    dependencies=[Depends(check_write_access_headers)],
+)
+def set_user_repo_config(owner: str, name: str, config: UserRepoConfig):
+    """
+    Set user repository config
+    """
+    gfi_repo: Optional[GfibotRepo] = GfibotRepo.objects(name=name, owner=owner).first()
+    if not gfi_repo:
+        raise HTTPException(404, f"Repository {owner}/{name} does not exist")
+    gfi_repo.update(config=config)
+    gfi_repo.save()
+    return GFIResponse(result=f"Repository {owner}/{name}'s config has been updated")
+
+
+@api.put(
+    "/repos/{owner}/{name}/actions/update",
+    response_model=GFIResponse[str],
+    dependencies=[Depends(check_write_access_headers)],
+)
+def force_update_repo(owner: str, name: str, x_github_token: str = Header()):
+    """
+    Force repository update
+    """
+    token = x_github_token
+    schedule_repo_update_now(owner, name, token)
+    return GFIResponse(result=f"Repository {owner}/{name} update job scheduled")
+
+
+@api.put(
+    "/repos/{owner}/{name}/actions/label",
+    response_model=GFIResponse[str],
+    dependencies=[Depends(check_write_access_headers)],
+)
+def force_label_issues(owner: str, name: str, x_github_user: str = Header()):
+    """
+    Force label issues
+    """
+    user: Optional[GfibotUser] = GfibotUser.objects(name=x_github_user).first()
+    if not user:
+        raise HTTPException(403, "Check X-Github-User header")
+    token = user.app_token
+    if not token:
+        raise HTTPException(403, "Github App not installed")
+    schedule_tag_task_now(owner, name, token)
+    return GFIResponse(result=f"Repository {owner}/{name} label job scheduled")
+
+
+@api.get(
+    "/searches",
+    response_model=GFIResponse[List[str]],
+    dependencies=[Depends(check_token_headers)],
+)
+def get_user_search_queries(limit: int = 5, x_github_user: str = Header()):
+    """
+    Get user's searched queries
+    """
+    user = x_github_user
+    if not user:
+        raise HTTPException(403, "Check X-Github-User header")
+    recent_queries = (
+        GfibotSearch.objects(login=user)
+        .order_by("-searched_at")
+        .distinct(field="query")
+        .only("query")
+        .limit(limit)
+    )
+    recent_queries = [r.query for r in recent_queries]
+    return GFIResponse(result=recent_queries)
+
+
+@api.get(
+    "/history",
+    response_model=GFIResponse[List[UserSearchedRepo]],
+    dependencies=[Depends(check_token_headers)],
+)
+def get_user_search_repos(limit: int = 10, x_github_user: str = Header()):
+    """
+    Get user's searched repos
+    """
+    user = x_github_user
+    if not user:
+        raise HTTPException(401, "Unauthorized: check X-Github-User header")
+    recent_repos = (
+        GfibotSearch.objects(login=user).order_by("-searched_at").limit(limit)
+    )
+    recent_repos = list(recent_repos)
+    return GFIResponse(result=recent_repos)

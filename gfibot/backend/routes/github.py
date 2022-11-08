@@ -4,9 +4,10 @@ import json
 
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import RedirectResponse
-from numpy import full
 from pydantic import BaseModel, HttpUrl
 import requests
+
+from github import GithubIntegration
 
 from gfibot.collections import *
 from gfibot.backend.models import (
@@ -23,14 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 def add_repos_from_github_app(
-    user_collection: GfiUsers, repositories: List[GitHubRepo]
+    user_collection: GfibotUser, repositories: List[GitHubRepo]
 ) -> int:
     """
     Add repositories update jobs to background tasks (returns immediately)
     returns: number of added jobs
     """
     repos_failed = []
-    user = user_collection.github_login
+    user = user_collection.login
     for repo in repositories:
         owner, name = repo.full_name.split("/")
         try:
@@ -47,14 +48,14 @@ def add_repos_from_github_app(
 
 
 def delete_repos_from_github_app(
-    user_collection: GfiUsers, repositories: List[GitHubRepo]
+    user_collection: GfibotUser, repositories: List[GitHubRepo]
 ) -> int:
     """
     Delete repositories from background tasks (returns immediately)
     returns: number of deleted jobs
     """
     repos_failed = []
-    user = user_collection.github_login
+    user = user_collection.login
     for repo in repositories:
         owner, name = repo.full_name.split("/")
         try:
@@ -79,12 +80,13 @@ def github_app_webhook_process(
     """
     event = x_github_event
     sender_id = data.sender["id"]
-    user_collection: GfiUsers = GfiUsers.objects(github_id=sender_id).first()
+    user_collection: GfibotUser = GfibotUser.objects(github_id=sender_id).first()
     if not user_collection:
         logger.error(f"user with github id {sender_id} not found")
         raise HTTPException(status_code=404, detail="user not found")
 
     processed_repos = 0
+    expected_repos = 0
     if event == "installation":
         expected_repos = len(data.repositories)
         action = data.action
@@ -143,7 +145,7 @@ def get_oauth_app_login_url():
     """
     Login via GitHub OAuth
     """
-    oauth_record: GithubTokens = GithubTokens.objects(app_name="gfibot-webapp").first()
+    oauth_record: GfibotToken = GfibotToken.objects(app_name="gfibot-webapp").first()
     if not oauth_record:
         raise HTTPException(
             status_code=404, detail="oauth record not found in database"
@@ -157,7 +159,7 @@ def redirect_from_github(code: str, redirect_from: str = "github_app_login"):
     """
     Installing from GitHub App
     """
-    oauth_record: GithubTokens = GithubTokens.objects(
+    oauth_record: GfibotToken = GfibotToken.objects(
         app_name="gfibot-githubapp"
         if redirect_from == "github_app_login"
         else "gfibot-webapp"
@@ -199,18 +201,18 @@ def redirect_from_github(code: str, redirect_from: str = "github_app_login"):
     user_res = GitHubUserInfo(**json.loads(r.text))
 
     update_obj = {
-        f"github_{k}": v
-        for k, v in dict(user_res).items()
-        if k not in ["twitter_username"]
+        "login": user_res.login,
+        "name": user_res.name,
+        "avatar_url": user_res.avatar_url,
+        "email": user_res.email,
     }
-    update_obj["twitter_user_name"] = user_res.twitter_username
 
     if redirect_from == "github_app_login":
-        update_obj["github_app_token"] = access_token
+        update_obj["app_token"] = access_token
     else:
-        update_obj["github_access_token"] = access_token
+        update_obj["oauth_token"] = access_token
 
-    GfiUsers.objects(github_id=user_res.id).upsert_one(**update_obj)
+    GfibotUser.objects(login=user_res.login).upsert_one(**update_obj)
 
     logger.info(f"user {user_res.login} logged in via {redirect_from}")
 

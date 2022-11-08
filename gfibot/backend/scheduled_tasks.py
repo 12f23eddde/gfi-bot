@@ -1,11 +1,9 @@
 """
-All functions below are scheduled tasks
-Do NOT call them directly from the backend
+Routines below are blocking and should be run in a separate thread (i.e. scheduler)
+NEVER call them directly from the backend, otherwise the backend will be blocked
 """
 
 import argparse
-import json
-from pydoc import describe
 from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from functools import wraps
@@ -13,12 +11,12 @@ import logging
 import random
 import datetime
 
-import requests
-import yagmail
-from graphql import is_type_node
 import mongoengine
+from pytz import utc
 from apscheduler.schedulers.background import BackgroundScheduler
-from github import BadCredentialsException, RateLimitExceededException
+from apscheduler.triggers.cron import CronTrigger
+from github import Github
+from github import BadCredentialsException, RateLimitExceededException, GithubException
 
 from gfibot import CONFIG, TOKENS
 from gfibot.data.update import update_repo
@@ -26,165 +24,113 @@ from gfibot.collections import *
 from gfibot.check_tokens import check_tokens
 from gfibot.data.dataset import get_dataset_for_repo, get_dataset_all
 
-# from gfibot.model._predictor import (
-#     update_training_summary,
-#     update_prediction,
-#     update_repo_prediction,
-# )
 from gfibot.model.predict import predict_repo
+
+from gfibot.backend.utils import get_gfi_threshold, get_newcomer_threshold
 
 executor = ThreadPoolExecutor(max_workers=10)
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_JOB_ID = "gfi_daemon"
+DEFAULT_JOB_ID = "gfibot-daemon"
+
+COMMENT_TEMPLATE = """
+Hi there, I'm GFI-Bot! :robot:
+
+I have predicted that this issue is a good first issue with a probability of {:.2f}%. :sparkles:
+"""
 
 
-def _add_comment_to_github_issue(
-    github_login, repo_name, repo_owner, issue_number, comment
+def _add_label_and_comment_to_github_issue(
+    owner: str,
+    name: str,
+    number: int,
+    token: str,
+    label: str = None,
+    comment: Optional[str] = None,
 ):
     """
-    Add comment to GitHub issue
+    Add label and comment to Github issue
     """
-    user_token = GfiUsers.objects(Q(github_login=github_login)).first().github_app_token
-    if user_token:
-        try:
-            headers = {
-                "Authorization": "token {}".format(user_token),
-                "Content-Type": "application/json",
-            }
-            url = "https://api.github.com/repos/{}/{}/issues/{}/comments".format(
-                repo_owner, repo_name, issue_number
-            )
-            r = requests.post(url, headers=headers, data=json.dumps({"body": comment}))
-            r.raise_for_status()
-        except Exception as e:
-            logger.warning(
-                "Error adding comment: %s, token: %s",
-                e,
-                "*" * (len(user_token) - 5) + user_token[-5:],
-            )
-        finally:
-            return r.status_code
-    else:
-        return 403
+    g = Github(jwt=token)
+    repo = g.get_repo(owner + "/" + name)
+    issue = repo.get_issue(number)
+    # check if label exists
+    for _label in issue.labels:
+        if _label.name == label:
+            logger.info("Label %s exists: %s/%s/%s", label, owner, name, number)
+            return
+
+    issue.add_to_labels(label)
+    logger.info("Label %s added: %s/%s/%s", label, owner, name, number)
+    if comment:
+        issue.create_comment(comment)
+        logger.info("Comment added: %s/%s/%s", owner, name, number)
 
 
-def _add_gfi_label_to_github_issue(
-    github_login, repo_name, repo_owner, issue_number, label_name="good first issue"
-):
-    """
-    Add label to Github issue
-    """
-    user_token = GfiUsers.objects(Q(github_login=github_login)).first().github_app_token
-    if user_token:
-        try:
-            headers = {"Authorization": "token {}".format(user_token)}
-            url = "https://api.github.com/repos/{}/{}/issues/{}/labels".format(
-                repo_owner, repo_name, issue_number
-            )
-            r = requests.post(url, headers=headers, json=["{}".format(label_name)])
-            r.raise_for_status()
-        except Exception as e:
-            logger.warning(
-                "Error adding label: %s, token: %s",
-                e,
-                "*" * (len(user_token) - 5) + user_token[-5:],
-            )
-        finally:
-            return r.status_code
-    else:
-        return 403
-
-
-def _send_email(user_github_login: str, subject: str, body: str) -> bool:
-    """
-    Send email to user via yagmail
-    """
-    logger.info("send email to user {}".format(user_github_login))
-    user_email = GfiUsers.objects(github_login=user_github_login).first().github_email
-    if not user_email:
-        logger.warning("User {} has no email".format(user_github_login))
-        return False
-
-    for e_obj in GfiEmail.objects():
-        email = e_obj.email
-        password = e_obj.password
-        logger.info("Sending email to {} using {}".format(user_email, email))
-
-        try:
-            yag = yagmail.SMTP(email, password)
-            yag.send(user_email, subject, body)
-            return True
-        except Exception as e:
-            logger.warning("Error sending email: {}".format(e))
-
-    return False
-
-
-def _tag_and_comment(github_login, owner, name):
-    """
-    Add labels and comments (if necessary) to GitHub issue
-    """
-    repo_query = GfiQueries.objects(Q(name=name) & Q(owner=owner)).first()
-    threshold = repo_query.repo_config.gfi_threshold
-    newcomer_threshold = repo_query.repo_config.newcomer_threshold
-    issue_tag = repo_query.repo_config.issue_tag
-    if repo_query and repo_query.is_github_app_repo:
-        predicts = Prediction.objects(
-            Q(owner=owner)
-            & Q(name=name)
-            & Q(probability__gte=threshold)
-            & Q(threshold=newcomer_threshold)
-        )
-        logger.info(
-            "Found {} good first issues for repo {} with threshold {}".format(
-                len(predicts), name, threshold
-            )
-        )
-        should_comment = repo_query.repo_config.need_comment
-        for predict in predicts:
-            if predict.tagged != True:
-                if (
-                    _add_gfi_label_to_github_issue(
-                        github_login=github_login,
-                        repo_name=predict.name,
-                        repo_owner=predict.owner,
-                        issue_number=predict.number,
-                        label_name=issue_tag,
-                    )
-                    == 200
-                ):
-                    predict.tagged = True
-                    predict.save()
-                else:
-                    logger.warning(
-                        "Failed to add label to issue {} in repo {}".format(
-                            predict.number, predict.name
-                        )
-                    )
-            if predict.commented != True and should_comment:
-                comment = "[GFI-Bot] Predicted as Good First Issue with probability {}%.".format(
-                    round((predict.probability) * 100, 2)
-                )
-                if (
-                    _add_comment_to_github_issue(
-                        github_login=github_login,
-                        repo_name=predict.name,
-                        repo_owner=predict.owner,
-                        issue_number=predict.number,
-                        comment=comment,
-                    )
-                    == 200
-                ):
-                    predict.commented = True
-                    predict.save()
-                else:
-                    logger.warning(
-                        "Failed to add comment to issue {} in repo {}".format(
-                            predict.number, predict.name
-                        )
-                    )
+# def _tag_and_comment(owner: str, name: str):
+#     """
+#     Add labels and comments (if necessary) to GitHub issue
+#     """
+#     repo_query = GfiQueries.objects(Q(name=name) & Q(owner=owner)).first()
+#     threshold = repo_query.repo_config.gfi_threshold
+#     newcomer_threshold = repo_query.repo_config.newcomer_threshold
+#     issue_tag = repo_query.repo_config.issue_tag
+#     if repo_query and repo_query.is_github_app_repo:
+#         predicts = Prediction.objects(
+#             Q(owner=owner)
+#             & Q(name=name)
+#             & Q(probability__gte=threshold)
+#             & Q(threshold=newcomer_threshold)
+#         )
+#         logger.info(
+#             "Found {} good first issues for repo {} with threshold {}".format(
+#                 len(predicts), name, threshold
+#             )
+#         )
+#         should_comment = repo_query.repo_config.need_comment
+#         for predict in predicts:
+#             if predict.tagged != True:
+#                 if (
+#                     _add_gfi_label_to_github_issue(
+#                         github_login=github_login,
+#                         repo_name=predict.name,
+#                         repo_owner=predict.owner,
+#                         issue_number=predict.number,
+#                         label_name=issue_tag,
+#                     )
+#                     == 200
+#                 ):
+#                     predict.tagged = True
+#                     predict.save()
+#                 else:
+#                     logger.warning(
+#                         "Failed to add label to issue {} in repo {}".format(
+#                             predict.number, predict.name
+#                         )
+#                     )
+#             if predict.commented != True and should_comment:
+#                 comment = "[GFI-Bot] Predicted as Good First Issue with probability {}%.".format(
+#                     round((predict.probability) * 100, 2)
+#                 )
+#                 if (
+#                     _add_comment_to_github_issue(
+#                         github_login=github_login,
+#                         repo_name=predict.name,
+#                         repo_owner=predict.owner,
+#                         issue_number=predict.number,
+#                         comment=comment,
+#                     )
+#                     == 200
+#                 ):
+#                     predict.commented = True
+#                     predict.save()
+#                 else:
+#                     logger.warning(
+#                         "Failed to add comment to issue {} in repo {}".format(
+#                             predict.number, predict.name
+#                         )
+#                     )
 
 
 def get_valid_tokens() -> List[str]:
@@ -192,40 +138,68 @@ def get_valid_tokens() -> List[str]:
     Get valid tokens
     """
     tokens = [
-        user.github_access_token
-        for user in GfiUsers.objects()
-        if user.github_access_token is not None
+        user.oauth_token
+        for user in GfibotUser.objects()
+        if user.oauth_token is not None
     ] + TOKENS
     return list(set(tokens) - check_tokens(tokens))
 
 
-def update_gfi_tags_and_comments(owner: str, name: str, send_email: bool = False):
+def label_and_comment(owner: str, name: str, token: str):
     """
-    Tags and comments GFIs for repository owner/name (blocks until done)
-    owner: GitHub repository owner
-    name: GitHub repository name
-    send_email: if True, send email to user
+    Add labels and comments (if necessary) to GitHub issue
     """
-    # 5. tag, comment and email (if needed)
-    user_github_login = None
-    query = GfiQueries.objects(Q(name=name) & Q(owner=owner)).first()
-    if query.is_github_app_repo and query.app_user_github_login:
-        user_github_login = query.app_user_github_login
-    if user_github_login:
-        # submit and wait for the job to finish
-        _tag_job = executor.submit(_tag_and_comment, user_github_login, owner, name)
-        _tag_job.result()
-    if user_github_login and send_email:
-        _email_job = executor.submit(
-            _send_email,
-            user_github_login,
-            "GFI-Bot: Update done for {}/{}".format(owner, name),
-            "GFI-Bot: Update done for {}/{}".format(owner, name),
-        )
-        _email_job.result()
-    logger.info(
-        "Tagged and commented " + owner + "/" + name + " at {}.".format(datetime.now())
+    repo: Optional[GfibotRepo] = GfibotRepo.objects(
+        Q(name=name) & Q(owner=owner)
+    ).first()
+    if not repo:
+        return
+
+    gfi_thres = get_gfi_threshold(name=name, owner=owner)
+    newcomer_thres = get_newcomer_threshold(name=name, owner=owner)
+
+    predicted_gfis: List[Prediction] = Prediction.objects(
+        owner=owner,
+        name=name,
+        probability__gte=gfi_thres,
+        threshold=newcomer_thres,
+        state="open",
     )
+
+    logger.info(
+        "Found {} good first issues for repo {} with threshold {}".format(
+            len(predicted_gfis), name, gfi_thres
+        )
+    )
+
+    issue_label = repo.config.issue_label
+    should_comment = repo.config.need_comment
+
+    for gfi in predicted_gfis:
+        try:
+            if gfi.tagged:
+                continue
+            _add_label_and_comment_to_github_issue(
+                owner=owner,
+                name=name,
+                number=gfi.number,
+                token=token,
+                label=issue_label,
+                comment=COMMENT_TEMPLATE.format(gfi.probability * 100)
+                if should_comment
+                else None,
+            )
+            gfi.tagged = True
+            if should_comment:
+                gfi.commented = True
+            gfi.save()
+        except GithubException as e:
+            logger.error(
+                "Failed to add label/comment to issue {} in repo {}".format(
+                    gfi.number, name
+                )
+            )
+            logger.error(e)
 
 
 def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False):
@@ -242,14 +216,14 @@ def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False)
 
     # 0. set state
     # q = GfiQueries.objects(Q(name=name) & Q(owner=owner)).first()
-    q = GfibotRepo.objects(Q(name=name) & Q(owner=owner)).first()
+    q: Optional[GfibotRepo] = GfibotRepo.objects(Q(name=name) & Q(owner=owner)).first()
     if q:
         # if q.is_updating:
         #     logger.info("{}/{} is already updating.".format(owner, name))
         #     return
         # q.update(is_updating=True, is_finished=False)
 
-        if q.state in ["collecting", "trainging"]:
+        if q.state in ["collecting", "training"]:
             logger.info("%s/%s is already updating: %s", owner, name, q.state)
             return
         q.update(state="collecting")
@@ -283,6 +257,15 @@ def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False)
             "Update done for " + owner + "/" + name + " at {}.".format(datetime.now())
         )
 
+        # 5. label and comment (if necessary)
+        if q.config.auto_label:
+            added_by = q.added_by
+            app_token = GfibotUser.objects(username=added_by).first().app_token
+            if not app_token:
+                logger.error("Not registered app token for user %s", added_by)
+            else:
+                label_and_comment(owner=owner, name=name, token=app_token)
+
         q.update(state="done")
 
     # 6. set state
@@ -293,29 +276,23 @@ def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False)
 
 
 def start_scheduler() -> BackgroundScheduler:
-    scheduler = BackgroundScheduler()
+    scheduler = BackgroundScheduler(timezone=utc)
     scheduler.add_job(daemon, "cron", hour=0, minute=0, id=DEFAULT_JOB_ID)
     valid_tokens = get_valid_tokens()
     if not valid_tokens:
         raise Exception("No valid tokens found.")
-    for i, query in enumerate(GfiQueries.objects()):
-        if query.update_config:
-            update_config = query.update_config
-            task_id = update_config.task_id
-            interval = update_config.interval
+    for i, repo in enumerate(GfibotRepo.objects()):
+        if repo.config:
+            config = repo.config
+            trigger = CronTrigger.from_crontab(config.update_cron)
+            trigger.jitter = 1200
+            task_id = f"{repo.owner}-{repo.name}-update"
             scheduler.add_job(
                 update_gfi_info,
-                "interval",
-                args=[valid_tokens[i % len(valid_tokens)], query.owner, query.name],
-                seconds=interval,
-                next_run_time=datetime.utcnow(),
+                trigger=trigger,
+                args=[valid_tokens[i % len(valid_tokens)], repo.owner, repo.name],
                 id=task_id,
                 replace_existing=True,
-            )
-            """update query begin time"""
-            update_config.begin_time = datetime.utcnow()
-            query.update(
-                update_config=update_config,
             )
             logger.info("Scheduled task: " + task_id + " added.")
     scheduler.start()
@@ -340,10 +317,10 @@ def daemon(init=False):
             update_repo(valid_tokens[i % len(valid_tokens)], owner, name)
     else:
         for i, repo in enumerate(list(Repo.objects().only("owner", "name"))):
-            repo_query = GfiQueries.objects(
+            repo_query = GfibotRepo.objects(
                 Q(name=repo.name) & Q(owner=repo.owner)
             ).first()
-            if not repo_query or not repo_query.update_config:
+            if not repo_query or not repo_query.config:
                 logger.info(
                     "Fetching repo data from github: %s/%s", repo.owner, repo.name
                 )
@@ -354,10 +331,10 @@ def daemon(init=False):
 
     for threshold in [1, 2, 3, 4, 5]:
         for i, repo in enumerate(list(Repo.objects().only("owner", "name"))):
-            repo_query = GfiQueries.objects(
+            repo_query = GfibotRepo.objects(
                 Q(name=repo.name) & Q(owner=repo.owner)
             ).first()
-            if not repo_query or not repo_query.update_config:
+            if not repo_query or not repo_query.config:
                 logger.info(
                     "Updating training summary and prediction: %s/%s@%d",
                     repo.owner,
@@ -446,10 +423,10 @@ def daemon_mp(init=False, n_workers: Optional[int] = None):
         ]
     else:
         for repo in Repo.objects():
-            repo_query = GfiQueries.objects(
+            repo_query = GfibotRepo.objects(
                 Q(name=repo.name) & Q(owner=repo.owner)
             ).first()
-            if (not repo_query) or (repo_query and not repo_query.update_config):
+            if (not repo_query) or (repo_query and not repo_query.config):
                 repos_to_update.append((repo.owner, repo.name))
     logger.info("Fetching %d repos from github", len(repos_to_update))
 

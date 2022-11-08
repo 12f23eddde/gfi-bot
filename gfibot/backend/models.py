@@ -1,7 +1,8 @@
-from typing import List, Tuple, TypeVar, Generic, Dict, Any, Optional, Final
+from typing import List, Tuple, TypeVar, Generic, Dict, Any, Optional, Final, Literal
 from enum import Enum
 from datetime import datetime
 
+import orjson
 from pydantic import BaseModel
 from pydantic.generics import GenericModel
 
@@ -11,6 +12,12 @@ T = TypeVar("T")
 class GFIResponse(GenericModel, Generic[T]):
     code: int = 200
     result: T
+
+
+class GFIPaginated(GFIResponse[List[T]], Generic[T]):
+    total: int
+    current: int
+    size: int
 
 
 class RepoQuery(BaseModel):
@@ -29,56 +36,96 @@ class RepoBrief(BaseModel):
     topics: List[str]
 
 
-class MonthlyCount(BaseModel):
-    month: datetime
-    count: int
-
-
 class RepoDetail(BaseModel):
     name: str
     owner: str
     description: Optional[str]
     language: Optional[str]
     topics: List[str]
-    monthly_stars: List[MonthlyCount]
+
+    # repository metrics
+    r_newcomer_resolved: float
+    n_stars: int
+    n_gfis: int
+    issue_close_time: float
+
+    # per-repo performance
+    accuracy: Optional[float]
+    auc: Optional[float]
+    last_updated: datetime
+
+
+class MonthlyCount(BaseModel):
+    month: datetime
+    count: int
+
+
+class RepoDynamics(BaseModel):
+    name: str
+    owner: str
+    # repository dynamics
     monthly_commits: List[MonthlyCount]
     monthly_issues: List[MonthlyCount]
     monthly_pulls: List[MonthlyCount]
 
 
 class RepoSort(Enum):
-    STARS = "popularity"
-    GFIS = "gfis"
-    ISSUE_CLOSE_TIME = "median_issue_resolve_time"
-    NEWCOMER_RESOLVE_RATE = "newcomer_friendly"
+    ALPHABETICAL_ASC = "name"
+    ALPHABETICAL_DESC = "-name"
+    STARS_ASC = "n_stars"
+    STARS_DESC = "-n_stars"
+    GFIS_ASC = "n_gfis"
+    GFIS_DESC = "-n_gfis"
+    ISSUE_CLOSE_TIME_ASC = "issue_close_time"
+    ISSUE_CLOSE_TIME_DESC = "-issue_close_time"
+    NEWCOMER_RESOLVE_RATE_ASC = "r_newcomer_resolved"
+    NEWCOMER_RESOLVE_RATE_DESC = "-r_newcomer_resolved"
 
 
 class UserSearchedRepo(BaseModel):
     name: str
     owner: str
-    created_at: datetime
-    increment: int
+    query: str
+    searched_at: datetime
 
 
 ### GFI Config Models ###
 
 
-class UpdateConfig(BaseModel):
-    task_id: str
-    interval: int
-    begin_time: datetime
+# class UpdateConfig(BaseModel):
+#     task_id: str
+#     interval: int
+#     begin_time: datetime
+#
+#
+# class RepoConfig(BaseModel):
+#     newcomer_threshold: int
+#     gfi_threshold: float
+#     need_comment: bool
+#     issue_tag: str
+#
+#
+# class Config(BaseModel):
+#     update_config: UpdateConfig
+#     repo_config: RepoConfig
 
 
-class RepoConfig(BaseModel):
+class UserRepo(BaseModel):
+    owner: str
+    name: str
+    state: Literal["done", "collecting", "trainning", "error"]
+
+
+class UserRepoConfig(BaseModel):
+    """Config for a repo"""
+
+    update_cron: str
     newcomer_threshold: int
     gfi_threshold: float
     need_comment: bool
-    issue_tag: str
-
-
-class Config(BaseModel):
-    update_config: UpdateConfig
-    repo_config: RepoConfig
+    auto_label: bool
+    issue_label: str
+    badge_prefix: str
 
 
 ### GFI Data Models ###
@@ -91,8 +138,18 @@ class GFIBrief(BaseModel):
     threshold: float
     probability: float
     last_updated: datetime
+    created_at: datetime
+    closed_at: Optional[datetime]
     state: Optional[str] = None
     title: Optional[str] = None
+    labels: Optional[List[str]] = None
+
+
+class GFISort(Enum):
+    PROBABILITY_ASC = "probability"
+    PROBABILITY_DESC = "-probability"
+    CREATED_AT_ASC = "created_at"
+    CREATED_AT_DESC = "-created_at"
 
 
 class TrainingResult(BaseModel):
@@ -102,9 +159,18 @@ class TrainingResult(BaseModel):
     issues_test: int
     n_resolved_issues: int
     n_newcomer_resolved: int
-    accuracy: Optional[float]
-    auc: Optional[float]
     last_updated: datetime
+
+    auc: Optional[float]
+    accuracy: Optional[float]
+    precision: Optional[float]
+    recall: Optional[float]
+    f1: Optional[float]
+
+
+FeatureImportance = Dict[str, float]
+
+GFIDataset = Dict[str, Any]
 
 
 ### GitHub API Data Models ###

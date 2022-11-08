@@ -6,13 +6,13 @@ from gfibot.backend.models import *
 
 def test_get_number_of_repos(mock_mongodb):
     client = TestClient(app)
-    response = client.get("/api/repos/num")
+    response = client.get("/api/repos/count")
     assert response.status_code == 200
     res = GFIResponse[int].parse_obj(response.json())
     assert res.result == Repo.objects.count()
 
     # num by language
-    response = client.get("/api/repos/num?language=Python")
+    response = client.get("/api/repos/count?language=Python")
     assert response.status_code == 200
     res = GFIResponse[int].parse_obj(response.json())
     assert res.result == Repo.objects(language="Python").count()
@@ -30,7 +30,7 @@ def test_get_repo_detail(mock_mongodb):
     client = TestClient(app)
     response = client.get("/api/repos/info/detail?name=name&owner=owner")
     assert response.status_code == 200
-    res = GFIResponse[RepoDetail].parse_obj(response.json())
+    res = GFIResponse[RepoDynamics].parse_obj(response.json())
     assert res.result.name == "name"
 
 
@@ -46,36 +46,36 @@ def test_get_repo_paged(mock_mongodb):
     client = TestClient(app)
     response = client.get("/api/repos/info/?start=0&length=3")
     assert response.status_code == 200
-    res = GFIResponse[List[RepoDetail]].parse_obj(response.json())
+    res = GFIResponse[List[RepoDynamics]].parse_obj(response.json())
     assert res.result[0].name == "name"
 
     # test language
     response = client.get("/api/repos/info/?start=0&length=3&lang=C++")
     assert response.status_code == 200
-    res = GFIResponse[List[RepoDetail]].parse_obj(response.json())
+    res = GFIResponse[List[RepoDynamics]].parse_obj(response.json())
     assert len(res.result) == 0
 
     # test sort
     response = client.get("/api/repos/info/?start=0&length=3&filter=popularity")
     assert response.status_code == 200
-    res = GFIResponse[List[RepoDetail]].parse_obj(response.json())
+    res = GFIResponse[List[RepoDynamics]].parse_obj(response.json())
     assert res.result[0].name == "name2"  # 2nd repo is the most popular
 
     response = client.get("/api/repos/info/?start=0&length=3&filter=gfis")
     assert response.status_code == 200
-    res = GFIResponse[List[RepoDetail]].parse_obj(response.json())
+    res = GFIResponse[List[RepoDynamics]].parse_obj(response.json())
     assert res.result[0].name == "name"  # 1st repo is the most GFIS
 
     response = client.get(
         "/api/repos/info/?start=0&length=3&filter=median_issue_resolve_time"
     )
     assert response.status_code == 200
-    res = GFIResponse[List[RepoDetail]].parse_obj(response.json())
+    res = GFIResponse[List[RepoDynamics]].parse_obj(response.json())
     assert res.result[0].name == "name2"  # 2nd repo median_issue_resolve_time is lower
 
     response = client.get("/api/repos/info/?start=0&length=3&filter=newcomer_friendly")
     assert response.status_code == 200
-    res = GFIResponse[List[RepoDetail]].parse_obj(response.json())
+    res = GFIResponse[List[RepoDynamics]].parse_obj(response.json())
     assert res.result[0].name == "name"  # 1st repo r_newcomer_resolved is higher
 
 

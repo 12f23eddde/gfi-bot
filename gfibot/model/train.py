@@ -175,6 +175,7 @@ def load_full_dataset(
         text_features=text_features,
         drop_open_issues=False,
         drop_insignificant_features=drop_insignificant_features,
+        balance_samples=True,
     )
     _df = _loader.load_dataset(
         queries=_queries,

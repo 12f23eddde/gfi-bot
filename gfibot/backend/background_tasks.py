@@ -1,76 +1,27 @@
 """
-All functions in this section are called from the backend
+All functions in this file are called from the backend
 """
 
 import logging
 import random
+from random import randint
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-import requests
 from fastapi import HTTPException
+from apscheduler.triggers.cron import CronTrigger
+import pandas as pd
 
+from gfibot.backend.models import UserRepoConfig
+from gfibot.backend.utils import get_newcomer_threshold
 from gfibot.collections import *
 from gfibot.backend.scheduled_tasks import (
     update_gfi_info,
     get_valid_tokens,
-    update_gfi_tags_and_comments,
+    label_and_comment,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def has_write_access(
-    owner: str, name: str, user: Optional[str] = None, token: Optional[str] = None
-) -> bool:
-    """
-    Check if {user} has write access to {owner}/{name}
-    """
-    if not token and user:
-        user_record = (
-            GfiUsers.objects(github_login=user)
-            .only("github_access_token", "github_app_token")
-            .first()
-        )
-        if not user_record:
-            return False
-        if (
-            user_record.github_app_token
-        ):  # user must have write access to install github app
-            logging.debug("User %s registered with github app", user)
-            return True
-        token = user_record.github_access_token
-    if not token:
-        logging.debug("No token provided")
-        return False
-    url = f"https://api.github.com/repos/{owner}/{name}"
-    response = requests.get(url, headers={"Authorization": f"token {token}"})
-    if response.status_code == 200:
-        data = response.json()
-        try:
-            if (
-                data["permissions"]["push"]
-                or data["permissions"]["admin"]
-                or data["permissions"]["maintain"]
-            ):
-                logging.debug(
-                    "User %s has privileges to write to %s/%s: %s",
-                    user,
-                    owner,
-                    name,
-                    str(data["permissions"]),
-                )
-                return True
-        except KeyError:
-            logging.debug(
-                "User %s has no privileges to write to %s/%s: %s",
-                user,
-                owner,
-                name,
-                str(data["permissions"]),
-            )
-            return False
-    return False
 
 
 def add_repo_to_gfibot(owner: str, name: str, user: str) -> None:
@@ -80,70 +31,43 @@ def add_repo_to_gfibot(owner: str, name: str, user: str) -> None:
         -> scheduled_worker (run every day from tomorrow)
     """
     logger.info("Adding repo %s/%s on backend request", owner, name)
-    user_record: GfiUsers = GfiUsers.objects(github_login=user).first()
-    if not user_record:
+    user: GfibotUser = GfibotUser.objects(login=user).first()
+    if not user:
         raise HTTPException(status_code=400, detail="User not found")
-    if not has_write_access(owner, name, user):
-        raise HTTPException(
-            status_code=403, detail="You do not have write access to this repo"
-        )
-    # add to user_queries
-    if not user_record.user_queries.filter(owner=owner, repo=name).first():
-        user_record.user_queries.append(
-            GfiUsers.UserQuery(
-                owner=owner,
-                repo=name,
-                created_at=datetime.now(timezone.utc),
-                increment=len(user_record.user_queries),
-            )
-        )
-        user_record.save()
     # add to repo_queries
-    q: Optional[GfiQueries] = GfiQueries.objects(name=name, owner=owner).first()
+    q: Optional[GfibotRepo] = GfibotRepo.objects(name=name, owner=owner).first()
     if not q:
         logger.info("Adding repo %s/%s to GFI-Bot", owner, name)
-        q = GfiQueries(
-            name=name,
+        q = GfibotRepo(
             owner=owner,
-            is_pending=True,
-            is_updating=False,
-            is_finished=False,
-            is_github_app_repo=True,
-            app_user_github_login=user_record.github_login,
-            _created_at=datetime.utcnow(),
-            repo_config=GfiQueries.GfiRepoConfig(),
+            name=name,
+            state="collecting",
+            added_by=user,
         )
     else:
         logger.info(f"update new query {name}/{owner}")
         q.update(
-            is_github_app_repo=True,
-            app_user_github_login=user_record.github_login,
+            state="collecting",
+            added_by=user,
         )
 
-    if not q.update_config:  # create initial config
-        q.update_config = GfiQueries.GfiUpdateConfig(
-            task_id=f"{owner}-{name}-update",
-            interval=24 * 3600,
-        )
+    if not q.config:  # create initial config
+        q.config = GfibotRepo.GfibotRepoConfig()
 
     q.save()
 
-    token = (
-        user_record.github_access_token
-        if user_record.github_access_token
-        else user_record.github_app_token
-    )
+    token = user.oauth_token if user.app_token else user.app_token
     schedule_repo_update_now(owner=owner, name=name, token=token)
+
     from .server import get_scheduler
 
     scheduler = get_scheduler()
+    trigger = CronTrigger.from_crontab(q.config.update_cron)
+    trigger.jitter = 1200  # flatten the curve
     if not scheduler.get_job(f"{owner}-{name}-update"):  # job not scheduled, create job
         scheduler.add_job(
             update_gfi_info,
-            "interval",
-            seconds=q.update_config.interval,
-            next_run_time=datetime.utcnow()
-            + timedelta(seconds=q.update_config.interval),
+            trigger=trigger,
             id=f"{owner}-{name}-update",
             args=[token, owner, name, False],
             replace_existing=True,
@@ -151,7 +75,7 @@ def add_repo_to_gfibot(owner: str, name: str, user: str) -> None:
 
 
 def schedule_repo_update_now(
-    owner: str, name: str, token: Optional[str] = None, send_email: bool = False
+    owner: str, name: str, token: Optional[str] = None
 ) -> None:
     """
     Run a temporary repo update job once
@@ -177,10 +101,14 @@ def schedule_repo_update_now(
         token = random.choice(valid_tokens)
 
     # run once
-    scheduler.add_job(update_gfi_info, id=job_id, args=[token, owner, name, send_email])
+    scheduler.add_job(
+        update_gfi_info,
+        id=job_id,
+        kwargs={"token": token, "owner": owner, "name": name},
+    )
 
 
-def schedule_tag_task_now(owner: str, name: str, send_email: bool = False):
+def schedule_tag_task_now(owner: str, name: str, token: str):
     """
     Run a temporary tag and comment job once
     owner: Repo owner
@@ -198,7 +126,9 @@ def schedule_tag_task_now(owner: str, name: str, send_email: bool = False):
 
     # run once
     scheduler.add_job(
-        update_gfi_tags_and_comments, id=job_id, args=[owner, name, send_email]
+        label_and_comment,
+        id=job_id,
+        kwargs={"owner": owner, "name": name, "token": token},
     )
 
 
@@ -207,10 +137,7 @@ def remove_repo_from_gfibot(owner: str, name: str, user: str) -> None:
     Remove repo from GFI-Bot
     """
     logger.info("Removing repo %s/%s on backend request", owner, name)
-    GfiUsers.objects(github_login=user).update(
-        __raw__={"$pull": {"user_queries": {"repo": name, "owner": owner}}}
-    )
-    q = GfiQueries.objects(Q(name=name) & Q(owner=owner)).first()
+    q = GfibotRepo.objects(name=name, owner=owner).first()
     if not q:
         raise HTTPException(status_code=400, detail="Repo not found")
     q.delete()
@@ -225,3 +152,102 @@ def remove_repo_from_gfibot(owner: str, name: str, user: str) -> None:
     TrainingSummary.objects(owner=owner, name=name).delete()
     # delete Repo
     Repo.objects(owner=owner, name=name).delete()
+
+
+def recommend_repo_config(
+    owner: str,
+    name: str,
+    user: Optional[str] = None,
+    newcomer_percentage: Optional[int] = None,
+    gfi_percentage: Optional[int] = None,
+) -> UserRepoConfig:
+    """
+    Recommend good first issue for a repository
+    :param owner: Repo owner
+    :param name: Repo name
+    :param user: Committer login
+    :param newcomer_percentage: percentage of newcomers
+    :param gfi_percentage: percentage of good first issues in open issues
+    """
+    if not newcomer_percentage:
+        newcomer_percentage = 0.4
+    else:
+        newcomer_percentage = newcomer_percentage / 100
+
+    if not gfi_percentage:
+        gfi_percentage = 0.05
+    else:
+        gfi_percentage = gfi_percentage / 100
+
+    selector = Q(name=name, owner=owner)
+    if user:
+        selector = selector & Q(committer=user)
+
+    repo_commits = pd.DataFrame(
+        RepoCommit.objects(selector)
+        .only("committer", "committed_at")
+        .order_by("committed_at")
+        .as_pymongo()
+    )
+    repo_commits["committed_at"] = pd.to_datetime(repo_commits["committed_at"])
+
+    # the hour with most commits
+    hour_of_day = repo_commits["committed_at"].dt.hour.value_counts().index[0]
+    # the day of week with most commits
+    day_of_week = repo_commits["committed_at"].dt.dayofweek.value_counts().index[0]
+
+    # median committed_at interval
+    repo_commits["committed_at"] = pd.to_datetime(repo_commits["committed_at"])
+    median_interval = repo_commits["committed_at"].diff().median()
+
+    # generate cron
+    if median_interval < pd.Timedelta("1 days"):  # daily
+        cron = f"{randint(0, 59)} {hour_of_day} * * *"
+    else:  # weekly
+        cron = f"{randint(0, 59)} {hour_of_day} {day_of_week} * 0"
+
+    # 25% percentile commits per user
+    _newcomer_thres = (
+        repo_commits["committer"].value_counts().quantile(newcomer_percentage)
+    )
+    logger.info("median_interval: %s #commits: %s", median_interval, _newcomer_thres)
+    # closest int between 1-5
+    _newcomer_thres = int(_newcomer_thres)
+    if _newcomer_thres < 1:
+        _newcomer_thres = 1
+    elif _newcomer_thres > 5:
+        _newcomer_thres = 5
+
+    # 25% quantile of predicted probability -> gfi_threshold
+    newcomer_thres = get_newcomer_threshold(owner, name)
+    gfis = pd.DataFrame(
+        Prediction.objects(owner=owner, name=name, threshold=newcomer_thres)
+        .only("number", "probability")
+        .as_pymongo()
+    )
+    _gfi_thres = gfis["probability"].quantile(1 - gfi_percentage)
+    _gfi_thres = float(round(_gfi_thres, 2))
+    logger.info("gfi threshold: %s", _gfi_thres)
+    if _gfi_thres > 0.8:
+        _gfi_thres = 0.8
+    if _gfi_thres < 0.2:
+        _gfi_thres = 0.2
+
+    logger.info(
+        "Recommended config for %s/%s: cron=%s, newcomer_threshold=%s, gfi_threshold=%s",
+        owner,
+        name,
+        cron,
+        _newcomer_thres,
+        _gfi_thres,
+    )
+
+    return UserRepoConfig(
+        update_cron=cron,
+        newcomer_threshold=int(_newcomer_thres),
+        gfi_threshold=float(_gfi_thres),
+        issue_label="good first issue",
+        need_comment=True,
+        auto_label=False,
+        badge_prefix="recommended good first issues",
+    )

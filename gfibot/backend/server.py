@@ -4,25 +4,25 @@ import os
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import ORJSONResponse
 from apscheduler.schedulers.background import BackgroundScheduler
 import mongoengine
 
 from gfibot import CONFIG
-from gfibot.backend.routes import github, issue, repos, user, model
+from gfibot.backend.routes import github, issues, repos, user, model, badge
 from gfibot.backend.scheduled_tasks import start_scheduler
-
-app = FastAPI()
 
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
-app = FastAPI(title="GFI-Bot")
+app = FastAPI(title="GFI-Bot", default_response_class=ORJSONResponse)
 
 app.include_router(repos.api, prefix="/api/repos")
-app.include_router(issue.api, prefix="/api/issue")
+app.include_router(issues.api, prefix="/api/issues")
 app.include_router(github.api, prefix="/api/github")
 app.include_router(user.api, prefix="/api/user")
 app.include_router(model.api, prefix="/api/model")
+app.include_router(badge.api, prefix="/api/badge")
 
 
 def get_scheduler() -> BackgroundScheduler:

@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 import datetime
 from typing import Final, List, Union, Any, Dict, Tuple, Literal, Optional
@@ -87,6 +88,18 @@ def predict_repo(owner: str, name: str, newcomer_thres: int) -> None:
     update_repo_training_summary(
         df=_df_closed, newcomer_thres=newcomer_thres, model=_model_eval
     )
+
+
+def get_feature_importance(newcomer_thres: int) -> Dict[str, float]:
+    """
+    Reads feature importance from training logs
+    TODO: save feature importance to database
+    """
+    model_name = MODEL_NAME_EVALUATION(newcomer_thres)
+    _path = get_full_path(GFIBOT_MODEL_PATH, model_name + ".importance.json")
+    with open(_path, "r") as f:
+        r = json.load(f)
+        return r
 
 
 if __name__ == "__main__":
