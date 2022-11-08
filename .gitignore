@@ -153,3 +153,6 @@ gfibot/backend/set_tokens_private.py
 
 # trained models
 gfi-bot
+
+# Ignore dynaconf secret files
+.secrets.*

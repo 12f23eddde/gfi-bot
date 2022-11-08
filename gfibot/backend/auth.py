@@ -2,6 +2,8 @@ from typing import Optional
 import logging
 import os
 
+from gfibot import CONFIG
+
 from github import Github, GithubException
 from fastapi import Body, Path, Header, HTTPException
 
@@ -12,7 +14,7 @@ def mask_token(token: str) -> str:
 
 
 def is_auth_disabled() -> bool:
-    if os.getenv("GFIBOT_DISABLE_AUTH", "False").lower() in ("true", "1", "t"):
+    if CONFIG.get("disable_auth"):
         logging.warning(
             "Github authentification has been disbled (GFIBOT_DISABLE_AUTH=True)."
         )

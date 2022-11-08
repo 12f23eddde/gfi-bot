@@ -1,0 +1,124 @@
+[default]
+[default.gfibot]
+# This list of 100 projects comes from RecGFI paper
+projects = [
+    "osmlab/name-suggestion-index",
+    "scikit-learn/scikit-learn",
+    "pandas-dev/pandas",
+    "mui-org/material-ui",
+    "OpenMined/PySyft",
+    "WordPress/gutenberg",
+    "elastic/elasticsearch",
+    "saltstack/salt",
+    "Revolutionary-Games/Thrive",
+    "sympy/sympy",
+    "DotNetAnalyzers/StyleCopAnalyzers",
+    "CleverRaven/Cataclysm-DDA",
+    "rubberduck-vba/Rubberduck",
+    "dotnet/runtime",
+    "Leaflet/Leaflet",
+    "nodejs/node",
+    "elastic/kibana",
+    "strongbox/strongbox",
+    "microsoft/vscode",
+    "duckduckgo/zeroclickinfo-spice",
+    "jainaman224/Algo_Ds_Notes",
+    "symfony/symfony",
+    "AnalyticalGraphicsInc/cesium",
+    "dotnet/roslyn",
+    "gatsbyjs/gatsby",
+    "zulip/zulip",
+    "xamarin/Xamarin.Forms",
+    "sindresorhus/refined-github",
+    "symfony/symfony-docs",
+    "appleseedhq/appleseed",
+    "zeit/next.js",
+    "FreezingMoon/AncientBeast",
+    "OpenRA/OpenRA",
+    "freeCodeCamp/freeCodeCamp",
+    "OpenRCT2/OpenRCT2",
+    "akkadotnet/akka.net",
+    "facebook/react",
+    "phpmyadmin/phpmyadmin",
+    "JabRef/jabref",
+    "prestodb/presto",
+    "serverless/serverless",
+    "microsoft/TypeScript",
+    "Elgg/Elgg",
+    "Swati4star/Images-to-PDF",
+    "checkstyle/checkstyle",
+    "dotnet/coreclr",
+    "internetarchive/openlibrary",
+    "oppia/oppia",
+    "facebook/react-native",
+    "RaRe-Technologies/gensim",
+    "the-tale/the-tale",
+    "Sylius/Sylius",
+    "mozilla/fxa-content-server",
+    "Trustroots/trustroots",
+    "TryGhost/Ghost",
+    "Qiskit/qiskit-terra",
+    "mozilla/thimble.mozilla.org",
+    "borgbackup/borg",
+    "x64dbg/x64dbg",
+    "PowerShell/PowerShell",
+    "aws/aws-cdk",
+    "matplotlib/matplotlib",
+    "nextcloud/server",
+    "aframevr/aframe",
+    "osquery/osquery",
+    "facebook/docusaurus",
+    "WeblateOrg/weblate",
+    "tomato42/tlsfuzzer",
+    "dotnet/corert",
+    "pnp/office365-cli",
+    "Yoast/wordpress-seo",
+    "gitextensions/gitextensions",
+    "Showndarya/Hacktoberfest",
+    "Mihara/RasterPropMonitor",
+    "jupyterlab/jupyterlab",
+    "elastic/eui",
+    "netlify/netlify-cms",
+    "pypa/warehouse",
+    "bitcoin/bitcoin",
+    "cBioPortal/cbioportal",
+    "magento/magento2",
+    "dotnet/machinelearning",
+    "nilearn/nilearn",
+    "yarnpkg/yarn",
+    "stylelint/stylelint",
+    "sendgrid/docs",
+    "MvvmCross/MvvmCross",
+    "composer/composer",
+    "SimpleMachines/SMF2.1",
+    "Submitty/Submitty",
+    "adobe/brackets",
+    "qTox/qTox",
+    "moment/moment",
+    "mne-tools/mne-python",
+    "eslint/eslint",
+    "facebook/jest",
+    "chocolatey/choco",
+    "octokit/octokit.net",
+    "eclipse/omr",
+    "badges/shields",
+]
+github_graphql_schema_path = "gfibot/data/github_graphql_schema.graphql"
+model_path="models/"
+cache_path=".cache/"
+default_gfi_threshold = 0.5  # default min confidence level for an issue to be considered GFI
+default_newcomer_threshold = 5  # default max # of commits for newcomers
+
+[default.mongodb]
+url = "mongodb://localhost:27020"
+db = "gfibot"
+
+[development]
+[development.mongodb]
+url = "mongodb://localhost:27021"
+db = "gfibot"
+
+[production]
+[production.mongodb]
+url = "mongodb://mongo:27020"
+db = "gfibot"

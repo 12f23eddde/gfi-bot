@@ -1,5 +1,4 @@
 import sys
-import toml
 import nltk
 import logging
 import os
@@ -7,42 +6,49 @@ import os
 from typing import List
 from pathlib import Path
 
+from dynaconf import Dynaconf
 
+# init logger
 logging.basicConfig(
     format="%(asctime)s (PID %(process)d) [%(levelname)s] %(filename)s:%(lineno)d %(message)s",
     level=logging.INFO,
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
+# load config
 BASE_DIR = Path(__file__).parent.parent.absolute()
-with open(BASE_DIR / "pyproject.toml", "r", encoding="utf-8") as f:
-    CONFIG = toml.load(f)
 
+CONFIG = Dynaconf(
+    envvar_prefix="GFIBOT",
+    settings_files=[
+        os.path.join(BASE_DIR, "settings.toml"),
+        os.path.join(BASE_DIR, ".secrets.toml"),
+    ],
+    environments=True,
+    env_switcher="GFIBOT_ENV",
+)
+
+# load tokens
 TOKENS: List[str] = []
-if not (BASE_DIR / "tokens.txt").exists():
-    logging.error("No tokens.txt file found. Please create one.")
-else:
+TOKENS = CONFIG.get("github.tokens", [])
+
+if (BASE_DIR / "tokens.txt").exists():
     with open(BASE_DIR / "tokens.txt") as f:
-        TOKENS = f.read().strip().split("\n")
+        TOKENS.extend(f.read().splitlines())
 
-# download if not exists to speedup startup
-try:
-    nltk.data.find("corpora/wordnet.zip")
-except LookupError:
-    nltk.download("wordnet")
+if not TOKENS:
+    logging.error(
+        "No tokens found in %s or %s",
+        BASE_DIR / "tokens.txt",
+        BASE_DIR / ".secrets.toml",
+    )
 
-try:
-    nltk.data.find("corpora/omw-1.4.zip")
-except LookupError:
-    nltk.download("omw-1.4")
+# download nltk data if not exists
+for corpus_data in ["wordnet", "omw-1.4", "stopwords"]:
+    try:
+        nltk.data.find(f"corpora/{corpus_data}.zip")
+    except LookupError:
+        nltk.download(corpus_data)
 
-try:
-    nltk.data.find("corpora/stopwords.zip")
-except LookupError:
-    nltk.download("stopwords")
 
-# run in dev env
-is_dev_env = os.environ.get("GFIBOT_ENV", "").lower()
-if is_dev_env in ["dev", "development"]:
-    logging.info("Running in development environment")
-    CONFIG["mongodb"] = CONFIG["mongodb_dev"]
+logging.info("Running in %s environment", CONFIG.get("ENV_FOR_DYNACONF"))

@@ -50,11 +50,11 @@ def get_db_connection():
 @app.on_event("startup")
 def startup_event():
     get_db_connection()
-    _skip_scheduler = os.environ.get("GFIBOT_SKIP_SCHEDULER", False)
+    _skip_scheduler = CONFIG.get("skip_scheduler", False)
     if not _skip_scheduler:
         get_scheduler()
     else:
-        logger.info("Skipping scheduler")
+        logger.info("Skipping scheduler initialization")
 
 
 if __name__ == "__main__":
