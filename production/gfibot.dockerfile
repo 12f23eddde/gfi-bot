@@ -27,7 +27,6 @@ RUN apt-get update \
         build-essential
 
 # Install Poetry - respects $POETRY_VERSION & $POETRY_HOME
-# Pin Poetry version: https://github.com/python-poetry/poetry/issues/6377
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
 # copy project requirement files here to ensure they will be cached.
@@ -46,7 +45,4 @@ COPY ./production /production
 EXPOSE 5000
 WORKDIR /
 
-RUN chmod +x production/run_production.sh
-ENTRYPOINT production/run_production.sh $0 $@
-
-CMD ["uvicorn", "gfibot.backend.server:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["poetry", "run", "uvicorn", "gfibot.backend.server:app", "--host", "0.0.0.0", "--port", "5000"]

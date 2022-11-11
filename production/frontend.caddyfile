@@ -1,4 +1,4 @@
-gfibot.io {
+${GFIBOT_DOMAIN} {
 	route {
 		reverse_proxy /api/* gfi-bot:5000 {
 			header_down +Access-Control-Allow-Origin "*"

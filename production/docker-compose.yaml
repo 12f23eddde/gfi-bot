@@ -26,8 +26,12 @@ services:
     volumes:
       - ${GFIBOT_DATA_DIR}/models:/models
       - ${GFIBOT_DATA_DIR}/nltk_data:/root/nltk_data
+      - ${GFIBOT_SECRET_PATH:-./.secrets.toml}:/.secrets.toml
     mem_limit: "6g"
     restart: always
+    environment:
+      - GFIBOT_ENV=${GFIBOT_ENV:-production}
+      - GFIBOT_DOMAIN=${GFIBOT_DOMAIN:-localhost}
     logging:
       options:
         max-size: "10m"
@@ -47,6 +51,8 @@ services:
     mem_limit: "10g"
     cpu_count: 3
     restart: always
+    environment:
+      - GFIBOT_ENV=${GFIBOT_ENV:-production}
     logging:
       options:
         max-size: "10m"
