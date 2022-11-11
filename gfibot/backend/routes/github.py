@@ -6,9 +6,9 @@ from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
 import requests
-
 from github import GithubIntegration
 
+from gfibot import CONFIG
 from gfibot.collections import *
 from gfibot.backend.models import (
     GFIResponse,
@@ -23,118 +23,6 @@ api = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def add_repos_from_github_app(
-    user_collection: GfibotUser, repositories: List[GitHubRepo]
-) -> int:
-    """
-    Add repositories update jobs to background tasks (returns immediately)
-    returns: number of added jobs
-    """
-    repos_failed = []
-    user = user_collection.login
-    for repo in repositories:
-        owner, name = repo.full_name.split("/")
-        try:
-            add_repo_to_gfibot(owner=owner, name=name, user=user)
-        except Exception as e:
-            repos_failed.append(repo.full_name)
-            logger.warning(f"failed to add repo {owner}/{name} to gfibot: {e}")
-    if repos_failed:
-        raise HTTPException(
-            500,
-            f"failed to add {len(repos_failed)}/{len(repositories)} repos to gfibot: {repos_failed}",
-        )
-    return len(repositories)
-
-
-def delete_repos_from_github_app(
-    user_collection: GfibotUser, repositories: List[GitHubRepo]
-) -> int:
-    """
-    Delete repositories from background tasks (returns immediately)
-    returns: number of deleted jobs
-    """
-    repos_failed = []
-    user = user_collection.login
-    for repo in repositories:
-        owner, name = repo.full_name.split("/")
-        try:
-            remove_repo_from_gfibot(owner=owner, name=name, user=user)
-        except Exception as e:
-            repos_failed.append(repo.full_name)
-            logger.warning(f"failed to delete repo {owner}/{name} from gfibot: {e}")
-    if repos_failed:
-        raise HTTPException(
-            500,
-            f"failed to delete {len(repos_failed)}/{len(repositories)} repos from gfibot: {repos_failed}",
-        )
-    return len(repositories)
-
-
-@api.post("/actions/webhook", response_model=GFIResponse[str])
-def github_app_webhook_process(
-    data: GitHubAppWebhookResponse, x_github_event: str = Header(default=None)
-) -> GFIResponse[str]:
-    """
-    Process Github App webhook
-    """
-    event = x_github_event
-    sender_id = data.sender["id"]
-    user_collection: GfibotUser = GfibotUser.objects(github_id=sender_id).first()
-    if not user_collection:
-        logger.error(f"user with github id {sender_id} not found")
-        raise HTTPException(status_code=404, detail="user not found")
-
-    processed_repos = 0
-    expected_repos = 0
-    if event == "installation":
-        expected_repos = len(data.repositories)
-        action = data.action
-        if action == "created":
-            processed_repos = add_repos_from_github_app(
-                user_collection, data.repositories
-            )
-        elif action == "deleted":
-            processed_repos = delete_repos_from_github_app(
-                user_collection, data.repositories
-            )
-        elif action == "suspend":
-            processed_repos = delete_repos_from_github_app(
-                user_collection, data.repositories
-            )
-        elif action == "unsuspend":
-            processed_repos = add_repos_from_github_app(
-                user_collection, data.repositories
-            )
-    elif event == "installation_repositories":
-        action = data.action
-        if action == "added":
-            expected_repos = len(data.repositories_added)
-            processed_repos = add_repos_from_github_app(
-                user_collection, data.repositories_added
-            )
-        elif action == "removed":
-            expected_repos = len(data.repositories_removed)
-            processed_repos = delete_repos_from_github_app(
-                user_collection, data.repositories_removed
-            )
-    elif event == "issues":
-        action = data.action
-        logger.info(
-            f"{action} issue {data.issue['number']} in {data.repository.full_name}"
-        )
-        return GFIResponse(result="Not implemented: event=%s" % event)
-    else:
-        return GFIResponse(result="Not implemented: event=%s" % event)
-
-    if processed_repos != expected_repos:
-        raise HTTPException(
-            status_code=500,
-            detail=f"{processed_repos} repos processed, {expected_repos} repos in total",
-        )
-    return GFIResponse(result=f"{processed_repos} repos processed")
-
-
 GITHUB_LOGIN_URL: Final = "https://github.com/login/oauth/authorize"
 GITHUB_OAUTH_URL: Final = "https://github.com/login/oauth/access_token"
 GITHUB_USER_API_URL: Final = "https://api.github.com/user"
@@ -143,38 +31,35 @@ GITHUB_USER_API_URL: Final = "https://api.github.com/user"
 @api.get("/login", response_model=GFIResponse[HttpUrl])
 def get_oauth_app_login_url():
     """
-    Login via GitHub OAuth
+    Get Github OAuth App login URL
     """
-    oauth_record: GfibotToken = GfibotToken.objects(app_name="gfibot-webapp").first()
-    if not oauth_record:
+    oauth_client_id = CONFIG["github_app"]["client_id"]
+    if not oauth_client_id:
         raise HTTPException(
-            status_code=404, detail="oauth record not found in database"
+            status_code=500, detail="Github app client id not configured"
         )
-    oauth_client_id = oauth_record.client_id
     return GFIResponse(result=f"{GITHUB_LOGIN_URL}?client_id={oauth_client_id}")
 
 
-@api.get("/app/installation", response_class=RedirectResponse)
-def redirect_from_github(code: str, redirect_from: str = "github_app_login"):
+@api.get("/callback", response_class=RedirectResponse)
+def redirect_from_github(code: str):
     """
-    Installing from GitHub App
+    Github OAuth callback
     """
-    oauth_record: GfibotToken = GfibotToken.objects(
-        app_name="gfibot-githubapp"
-        if redirect_from == "github_app_login"
-        else "gfibot-webapp"
-    ).first()
-    if not oauth_record:
+    client_id = CONFIG["github_app"]["client_id"]
+    client_secret = CONFIG["github_app"]["client_secret"]
+
+    if not client_id or not client_secret:
         raise HTTPException(
-            status_code=500, detail="oauth record not found in database"
+            status_code=500, detail="Github app client id or secret not configured"
         )
 
     # auth github app
     r = requests.post(
         GITHUB_OAUTH_URL,
         data={
-            "client_id": oauth_record.client_id,
-            "client_secret": oauth_record.client_secret,
+            "client_id": client_id,
+            "client_secret": client_secret,
             "code": code,
         },
     )
@@ -207,14 +92,11 @@ def redirect_from_github(code: str, redirect_from: str = "github_app_login"):
         "email": user_res.email,
     }
 
-    if redirect_from == "github_app_login":
-        update_obj["app_token"] = access_token
-    else:
-        update_obj["oauth_token"] = access_token
+    update_obj["oauth_token"] = access_token
 
     GfibotUser.objects(login=user_res.login).upsert_one(**update_obj)
 
-    logger.info(f"user {user_res.login} logged in via {redirect_from}")
+    logger.info(f"user {user_res.login} logged in via oauth")
 
     params = {
         "github_login": user_res.login,

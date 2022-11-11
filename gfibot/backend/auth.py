@@ -1,16 +1,11 @@
 from typing import Optional
 import logging
-import os
 
 from gfibot import CONFIG
+from gfibot.backend.utils import mask_token
 
 from github import Github, GithubException
 from fastapi import Body, Path, Header, HTTPException
-
-
-def mask_token(token: str) -> str:
-    unmasked_chars = max(3, len(token) // 3)
-    return "*" * (len(token) - unmasked_chars) + token[-unmasked_chars:]
 
 
 def is_auth_disabled() -> bool:

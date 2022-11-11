@@ -114,8 +114,8 @@ def get_issues_count_path_params(
 def get_issues_path_params(
     owner: str,
     name: str,
-    start: int,
-    limit: int,
+    start: int = 10,
+    limit: int = 10,
     sort: Optional[GFISort] = None,
     option: Optional[Literal["gfis"]] = None,
 ):

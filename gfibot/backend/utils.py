@@ -24,3 +24,8 @@ def get_gfi_threshold(owner: Optional[str], name: Optional[str]) -> float:
         return CONFIG["gfibot"]["default_gfi_threshold"]
     except KeyError:
         return 0.5
+
+
+def mask_token(token: str) -> str:
+    unmasked_chars = max(3, len(token) // 3)
+    return "*" * (len(token) - unmasked_chars) + token[-unmasked_chars:]

@@ -19,10 +19,12 @@ from github import Github
 from github import BadCredentialsException, RateLimitExceededException, GithubException
 
 from gfibot import CONFIG, TOKENS
+
 from gfibot.data.update import update_repo
 from gfibot.collections import *
 from gfibot.check_tokens import check_tokens
 from gfibot.data.dataset import get_dataset_for_repo, get_dataset_all
+from gfibot.backend.ghapp import get_repo_app_token
 
 from gfibot.model.predict import predict_repo
 
@@ -227,6 +229,9 @@ def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False)
             logger.info("%s/%s is already updating: %s", owner, name, q.state)
             return
         q.update(state="collecting")
+    else:
+        logger.info("No such repo: %s/%s", owner, name)
+        return
 
     try:
         # 1. fetch repo data
@@ -259,12 +264,14 @@ def update_gfi_info(token: str, owner: str, name: str, send_email: bool = False)
 
         # 5. label and comment (if necessary)
         if q.config.auto_label:
-            added_by = q.added_by
-            app_token = GfibotUser.objects(username=added_by).first().app_token
-            if not app_token:
-                logger.error("Not registered app token for user %s", added_by)
-            else:
+            # obtain a valid token
+            try:
+                app_token = get_repo_app_token(owner=owner, name=name)
+                if not app_token:
+                    raise GithubException("App installation not found.")
                 label_and_comment(owner=owner, name=name, token=app_token)
+            except GithubException as e:
+                logger.error("Failed to obtain installation token: %s", e)
 
         q.update(state="done")
 

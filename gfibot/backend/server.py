@@ -9,7 +9,15 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import mongoengine
 
 from gfibot import CONFIG
-from gfibot.backend.routes import github, issues, repos, user, model, badge
+from gfibot.backend.routes import (
+    github,
+    issues,
+    repos,
+    user,
+    model,
+    badge,
+    app as app_routes,
+)
 from gfibot.backend.scheduled_tasks import start_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +31,7 @@ app.include_router(github.api, prefix="/api/github")
 app.include_router(user.api, prefix="/api/user")
 app.include_router(model.api, prefix="/api/model")
 app.include_router(badge.api, prefix="/api/badge")
+app.include_router(app_routes.api, prefix="/api/app")
 
 
 def get_scheduler() -> BackgroundScheduler:

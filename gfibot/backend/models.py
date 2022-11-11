@@ -187,6 +187,7 @@ class GitHubRepo(BaseModel):
 
 class GitHubAppWebhookResponse(BaseModel):
     sender: Dict[str, Any]
+    installation: Dict[str, Any]
     action: str
     issue: Optional[Dict[str, Any]]
     repository: Optional[GitHubRepo]

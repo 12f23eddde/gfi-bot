@@ -19,6 +19,7 @@ from gfibot.backend.background_tasks import (
     recommend_repo_config,
 )
 from gfibot.backend.auth import check_token_headers, check_write_access_headers
+from gfibot.backend.ghapp import get_repo_app_token
 
 api = APIRouter()
 logger = logging.getLogger(__name__)
@@ -151,14 +152,11 @@ def force_update_repo(owner: str, name: str, x_github_token: str = Header()):
     response_model=GFIResponse[str],
     dependencies=[Depends(check_write_access_headers)],
 )
-def force_label_issues(owner: str, name: str, x_github_user: str = Header()):
+def force_label_issues(owner: str, name: str):
     """
     Force label issues
     """
-    user: Optional[GfibotUser] = GfibotUser.objects(name=x_github_user).first()
-    if not user:
-        raise HTTPException(403, "Check X-Github-User header")
-    token = user.app_token
+    token = get_repo_app_token(owner, name)
     if not token:
         raise HTTPException(403, "Github App not installed")
     schedule_tag_task_now(owner, name, token)

@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import HTTPException
 from apscheduler.triggers.cron import CronTrigger
 import pandas as pd
+from github import GithubException
 
 from gfibot.backend.models import UserRepoConfig
 from gfibot.backend.utils import get_newcomer_threshold
@@ -19,6 +20,9 @@ from gfibot.backend.scheduled_tasks import (
     update_gfi_info,
     get_valid_tokens,
     label_and_comment,
+)
+from gfibot.backend.ghapp import (
+    get_repo_app_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +60,15 @@ def add_repo_to_gfibot(owner: str, name: str, user: str) -> None:
 
     q.save()
 
-    token = user.oauth_token if user.app_token else user.app_token
+    # obtain a valid token
+    try:
+        token = get_repo_app_token(owner=owner, name=name)
+        if not token:
+            raise GithubException("App installation not found.")
+    except GithubException as e:
+        logger.error("Failed to obtain installation token: %s", e)
+        token = user.oauth_token
+
     schedule_repo_update_now(owner=owner, name=name, token=token)
 
     from .server import get_scheduler

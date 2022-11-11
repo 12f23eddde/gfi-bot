@@ -4,18 +4,36 @@ from datetime import datetime
 from mongoengine import *
 
 
-class GfibotToken(Document):
-    """Github App Tokens"""
+# class GfibotToken(Document):
+#     """Github App Tokens"""
 
-    app_name = StringField(required=True)
-    client_id = StringField(required=True)
-    client_secret = StringField(required=True)
+#     app_name = StringField(required=True)
+#     client_id = StringField(required=True)
+#     client_secret = StringField(required=True)
+#     token = StringField(required=True)
+
+#     meta = {
+#         "indexes": [
+#             {"fields": ["client_id"], "unique": True},
+#             {"fields": ["app_name"], "unique": True},
+#         ]
+#     }
+
+
+class GfibotInstallation(Document):
+    """
+    Github App Installation
+    """
+
+    installation_id = IntField(required=True, unique=True)
     token = StringField(required=True)
+    expires_at = DateTimeField(required=True)
+    login = StringField(required=True)
 
     meta = {
         "indexes": [
-            {"fields": ["client_id"], "unique": True},
-            {"fields": ["app_name"], "unique": True},
+            {"fields": ["installation_id"], "unique": True},
+            "#login",
         ]
     }
 
@@ -48,6 +66,7 @@ class GfibotRepo(Document):
 
     # login of the user who added the repo
     added_by: str = StringField(required=False)
+    installation_id: int = IntField(required=False)
     config: GfibotRepoConfig = EmbeddedDocumentField(GfibotRepoConfig)
     _added_at: datetime = DateTimeField(required=True, default=datetime.utcnow)
     _updated_at: datetime = DateTimeField(required=True, default=datetime.utcnow)
@@ -59,7 +78,6 @@ class GfibotUser(Document):
     login: str = StringField(required=True)
     name: str = StringField(required=True)
     oauth_token: str = StringField(required=False)
-    app_token: str = StringField(required=False)
     email: str = StringField(required=False)
     avatar_url: str = StringField(required=False)
     meta = {
