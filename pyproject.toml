@@ -18,6 +18,8 @@ tqdm = "^4.62.3"
 python-dateutil = "^2.8.2"
 dateutils = "^0.6.12"
 multiprocess = "^0.70.13"
+orjson = "^3.8.1"
+dynaconf = "^3.1.11"
 # MongoDB
 pymongo = {version = "^3.12.3", extras = ["srv"]}
 mongoengine = "^0.24.1"
@@ -40,17 +42,14 @@ sklearn = "^0.0"
 sentistrength = "^0.0.9"
 nltk = "^3.7"
 gensim = "^4.1.2"
-gunicorn = "^20.1.0"
 # Scheduler
 gevent = "^21.12.0"
 APScheduler = "^3.9.1"
 psutil = "^5.9.3"
-PyJWT = {extras = ["crypto"], version = "^2.6.0"}
-orjson = "^3.8.1"
-dynaconf = "^3.1.11"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2"
 pytest-cov = "^3.0.0"
 black = "*"
 pre-commit = "*"
+responses = "^0.22.0"
