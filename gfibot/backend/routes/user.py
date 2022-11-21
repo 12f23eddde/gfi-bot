@@ -37,7 +37,10 @@ def get_user_repo_list(x_github_user: str = Header()):
     user = x_github_user
     if not user:
         raise HTTPException(403, "Check X-Github-User header")
-    repos = list(GfibotRepo.objects(added_by=user).only(*UserRepo.__fields__))
+    repos = [
+        UserRepo(**r.to_mongo())
+        for r in GfibotRepo.objects(added_by=user).only(*UserRepo.__fields__)
+    ]
     return GFIResponse(result=repos)
 
 

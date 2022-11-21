@@ -70,7 +70,7 @@ def redirect_from_github(code: str):
         raise HTTPException(
             status_code=500, detail="Failed to obtain access token via oauth"
         )
-    access_token = dict(parse_qsl(r.text))["access_token"]
+    access_token = r.json()["access_token"]
 
     # get user info
     r = requests.get(

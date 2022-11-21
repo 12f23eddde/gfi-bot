@@ -28,8 +28,8 @@ def test_get_repo_gfis(mock_mongodb):
     logging.info(response.json())
     assert response.status_code == 200
     res = GFIPaginated[GFIBrief].parse_obj(response.json())
-    assert res.size == len(res.items)
-    assert res.items[0].name == "name"
+    assert res.size == len(res.result)
+    assert res.result[0].name == "name"
 
     response = client.get(
         "/api/issues", params={"name": "name", "owner": "owner", "option": "gfis"}

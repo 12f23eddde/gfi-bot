@@ -37,7 +37,7 @@ def add_repo_to_gfibot(owner: str, name: str, user: str) -> None:
     logger.info("Adding repo %s/%s on backend request", owner, name)
     user: GfibotUser = GfibotUser.objects(login=user).first()
     if not user:
-        raise HTTPException(status_code=400, detail="User not found")
+        raise HTTPException(status_code=403, detail="User not found")
     # add to repo_queries
     q: Optional[GfibotRepo] = GfibotRepo.objects(name=name, owner=owner).first()
     if not q:

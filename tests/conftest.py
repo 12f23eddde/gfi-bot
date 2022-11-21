@@ -1,16 +1,16 @@
 import pytest
 import logging
+from typing import Dict, List, Optional, Any, TypeVar
+
 import mongoengine
 import mongoengine.context_managers
-from gfibot.backend.routes.user import github_login
-import gfibot.model._predictor
-import gfibot.model.base
 
 from datetime import datetime, timezone
 from gfibot import CONFIG, TOKENS
 from gfibot.check_tokens import check_tokens
 from gfibot.collections import *
 from gfibot.data.dataset import *
+import gfibot.model.base
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -20,8 +20,6 @@ def execute_before_any_test():
     # Ensure that the production database is not touched in all tests
     CONFIG["mongodb"]["db"] = "gfibot-test"
     mongoengine.disconnect_all()
-
-    gfibot.model._predictor.MODEL_ROOT_DIRECTORY = "models-test"
     gfibot.model.base.GFIBOT_MODEL_PATH = "models-test"
     os.makedirs("models-test", exist_ok=True)
 
@@ -29,72 +27,20 @@ def execute_before_any_test():
     os.environ["GFIBOT_SKIP_SCHEDULER"] = "1"
     # limit since_date in tests
     os.environ["CI"] = "1"
+    # don't authenticate in tests
+    os.environ["GFIBOT_DISABLE_AUTH"] = "1"
+    os.environ["GFIBOT_ENV"] = "test"
 
 
-@pytest.fixture(scope="function")
-def real_mongodb():
-    """
-    Prepare a real MongoDB instance for test usage.
-    This fixture should only be used for test_all().
-    """
-    CONFIG["mongodb"]["db"] = "gfibot-test"
-
-    conn = mongoengine.connect(
-        CONFIG["mongodb"]["db"],
-        host=CONFIG["mongodb"]["url"],
-        tz_aware=True,
-        uuidRepresentation="standard",
-    )
-    conn.drop_database(CONFIG["mongodb"]["db"])
-
-    yield
-
-    mongoengine.disconnect()
-
-
-@pytest.fixture(scope="function")
-def mock_mongodb():
-    """
-    Prepare a mock MongoDB instance for test usage.
-    This fixture can be used by any test that want some interaction with MongoDB.
-    The MongoDB will contain some mock data for writing unit tests.
-    """
-
-    CONFIG["mongodb"]["db"] = "gfibot-test2"
-
-    mongoengine.connect(
-        CONFIG["mongodb"]["db"],
-        host="mongomock://localhost",
-        tz_aware=True,
-        uuidRepresentation="standard",
-    )
-    # It seems that drop database does not work with mongomock
-    collections = [
-        Repo,
-        RepoIssue,
-        RepoCommit,
-        RepoStar,
-        OpenIssue,
-        ResolvedIssue,
-        Dataset,
-        User,
-        GfiUsers,
-        GithubTokens,
-        GfiQueries,
-        GfiEmail,
-        TrainingSummary,
-        Prediction,
-    ]
-    for cls in collections:
-        cls.drop_collection()
-
-    repos = [
+# Mocked mongodb data
+MONGOMOCK_DATA: Dict[Document.__class__, List[Document]] = {
+    Repo: [
         Repo(
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
             owner="owner",
             name="name",
-            language="Python",
+            language="C#",
             topics=["topic1", "topic2"],
             description="Your Awesome Random APP",
             repo_created_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
@@ -149,8 +95,8 @@ def mock_mongodb():
                 )
             ],
         ),
-    ]
-    repo_commits = [
+    ],
+    RepoCommit: [
         RepoCommit(
             owner="owner",
             name="name",
@@ -161,8 +107,8 @@ def mock_mongodb():
             committed_at=datetime(2022, 1, 2, tzinfo=timezone.utc),
             message="fixes #1",
         )
-    ]
-    repo_issues = [
+    ],
+    RepoIssue: [
         RepoIssue(
             owner="owner",
             name="name",
@@ -219,16 +165,16 @@ def mock_mongodb():
             is_pull=False,
             merged_at=None,
         ),
-    ]
-    repo_stars = [
+    ],
+    RepoStar: [
         RepoStar(
             owner="owner",
             name="name",
             user="a1",
             starred_at=datetime(2022, 1, 1, tzinfo=timezone.utc),
         )
-    ]
-    resolved_issues = [
+    ],
+    ResolvedIssue: [
         ResolvedIssue(
             owner="owner",
             name="name",
@@ -276,8 +222,8 @@ def mock_mongodb():
                 ),
             ],
         ),
-    ]
-    open_issues = [
+    ],
+    OpenIssue: [
         OpenIssue(
             owner="owner",
             name="name",
@@ -293,8 +239,8 @@ def mock_mongodb():
                 )
             ],
         )
-    ]
-    users = [
+    ],
+    User: [
         User(
             _created_at=datetime.utcnow(),
             _updated_at=datetime.utcnow(),
@@ -324,8 +270,8 @@ def mock_mongodb():
             pull_reviews=[],
             commit_contributions=[],
         ),
-    ]
-    datasets = [
+    ],
+    Dataset: [
         Dataset(
             owner="owner",
             name="name",
@@ -446,88 +392,8 @@ def mock_mongodb():
                 ),
             ],
         ),
-    ]
-    github_tokens: List[GithubTokens] = [
-        GithubTokens(
-            app_name="gfibot-webapp",
-            client_id="this_is_not_a_client_id_1",
-            client_secret="this_is_not_a_client_secret_1",
-        ),
-        GithubTokens(
-            app_name="gfibot-githubapp",
-            client_id="this_is_not_a_client_id_2",
-            client_secret="this_is_not_a_client_secret_2",
-        ),
-    ]
-    gfi_users: List[GfiUsers] = [
-        GfiUsers(
-            github_id=1,
-            github_access_token="this_is_not_access_token",
-            github_app_token="this_is_not_app_token",
-            github_login="chuchu",
-            github_name="chu^2",
-            user_queries=[
-                GfiUsers.UserQuery(
-                    repo="name",
-                    owner="owner",
-                    created_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
-                    increment=1,
-                ),
-                GfiUsers.UserQuery(
-                    repo="name2",
-                    owner="owner2",
-                    created_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
-                    increment=1,
-                ),
-            ],
-        ),
-        GfiUsers(
-            github_id=2,
-            github_access_token="this_is_not_access_token",
-            github_login="nobody",
-            github_name="nobody",
-            user_searches=[
-                GfiUsers.UserQuery(
-                    repo="name",
-                    owner="owner",
-                    created_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
-                    increment=i,
-                )
-                for i in range(3)
-            ],
-        ),
-    ]
-    gfi_queries: List[GfiQueries] = [
-        GfiQueries(
-            name="name",
-            owner="owner",
-            is_pending=False,
-            is_finished=True,
-            is_updating=False,
-            is_github_app_repo=True,
-            app_user_github_login="",
-            _created_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
-            _finished_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
-            update_config=GfiQueries.GfiUpdateConfig(
-                task_id="task_id",
-                interval=24 * 3600,
-                begin_time=datetime(1970, 1, 1, tzinfo=timezone.utc),
-            ),
-            repo_config=GfiQueries.GfiRepoConfig(
-                newcomer_threshold=CONFIG["gfibot"]["default_newcomer_threshold"],
-                gfi_threshold=CONFIG["gfibot"]["default_gfi_threshold"],
-                need_comment=True,
-                issue_tag="good first issue",
-            ),
-        ),
-    ]
-    gfi_emails: List[GfiEmail] = [
-        GfiEmail(
-            email="not.a.email.address@email.com",
-            password="not_a.password",
-        )
-    ]
-    training_summaries: List[TrainingSummary] = [
+    ],
+    TrainingSummary: [
         TrainingSummary(
             owner="owner",
             name="name",
@@ -553,16 +419,29 @@ def mock_mongodb():
             last_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
             r_newcomer_resolved=0.0,
             n_stars=15,
+            n_gfis=1,
             accuracy=0.5,
             auc=0.6,
             issue_close_time=114,
         ),
-    ]
-    predictions: List[Prediction] = [
+        TrainingSummary(
+            owner="",
+            name="",
+            threshold=CONFIG["gfibot"]["default_newcomer_threshold"],
+            last_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+            accuracy=0.5,
+            auc=0.6,
+            issue_close_time=114,
+            n_resolved_issues=3,
+            n_newcomer_resolved=0,
+        ),
+    ],
+    Prediction: [
         Prediction(
             owner="owner",
             name="name",
             number=1,
+            state="closed",
             threshold=CONFIG["gfibot"]["default_newcomer_threshold"],
             probability=0.9,
             last_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
@@ -570,45 +449,132 @@ def mock_mongodb():
         Prediction(
             owner="owner",
             name="name",
-            number=2,
+            number=4,
+            state="open",
             threshold=CONFIG["gfibot"]["default_newcomer_threshold"],
             probability=0.3,
             last_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
         ),
-    ]
+        Prediction(
+            owner="owner",
+            name="name",
+            number=9,
+            state="open",
+            threshold=1 if CONFIG["gfibot"]["default_newcomer_threshold"] != 1 else 5,
+            probability=0.1,
+            last_updated=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        ),
+    ],
+    GfibotUser: [
+        GfibotUser(
+            login="owner",
+            name="GfibotUser1",
+            oauth_token="not_a_real_token",
+            email="owner@example.com",
+            avatar_url="https://avatars.githubusercontent.com/u/1?v=4",
+        )
+    ],
+    GfibotSearch: [
+        GfibotSearch(
+            owner="owner",
+            name="name",
+            query="query",
+            login="owner",
+            searched_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+        )
+    ],
+    GfibotInstallation: [
+        GfibotInstallation(
+            token="not_a_real_token",
+            installation_id=1,
+            login="owner",
+            expires_at=datetime(2050, 1, 1, tzinfo=timezone.utc),
+        )
+    ],
+    GfibotRepo: [
+        GfibotRepo(
+            owner="owner",
+            name="name",
+            state="done",
+            added_by="owner",
+            config=GfibotRepo.GfibotRepoConfig(
+                update_cron="0 0 * * *",
+                newcomer_threshold=CONFIG["gfibot"]["default_newcomer_threshold"],
+                gfi_threshold=CONFIG["gfibot"]["default_gfi_threshold"],
+            ),
+        )
+    ],
+}
 
-    for repo in repos:
-        repo.save()
-    for commit in repo_commits:
-        commit.save()
-    for issue in repo_issues:
-        issue.save()
-    for star in repo_stars:
-        star.save()
-    for resolved_issue in resolved_issues:
-        resolved_issue.save()
+
+def insert_mock_data():
+    # It seems that drop database does not work with mongomock
+    for cls, data in MONGOMOCK_DATA.items():
+        cls.drop_collection()
+        for index, d in enumerate(data):
+            try:
+                d.save(force_insert=True)  # TODO: won't work without force_insert=True?
+            except mongoengine.errors.ValidationError as e:
+                logging.error(f"Error at index {index} of {cls}: {e}")
+                logging.error(f"Trying to insert: {d}")
+                raise e
+        # validate
+        assert cls.objects().count() == len(data)
+
+    for resolved_issue in MONGOMOCK_DATA[ResolvedIssue]:
         get_dataset(resolved_issue, resolved_issue.resolved_at)
         get_dataset(resolved_issue, resolved_issue.created_at)
-    for open_issue in open_issues:
-        open_issue.save()
+
+    for open_issue in MONGOMOCK_DATA[OpenIssue]:
         get_dataset(open_issue, open_issue.updated_at)
-    for user in users:
-        user.save()
-    for dataset in datasets:
-        dataset.save()
-    for github_token in github_tokens:
-        github_token.save()
-    for gfi_user in gfi_users:
-        gfi_user.save()
-    for gfi_query in gfi_queries:
-        gfi_query.save()
-    for gfi_email in gfi_emails:
-        gfi_email.save()
-    for training_summary in training_summaries:
-        training_summary.save()
-    for prediction in predictions:
-        prediction.save()
+
+
+@pytest.fixture(scope="function")
+def real_mongodb():
+    """
+    Prepare a real MongoDB instance for test usage.
+    This fixture should only be used for test_all().
+    """
+    CONFIG["mongodb"]["db"] = "gfibot-test"
+
+    conn = mongoengine.connect(
+        CONFIG["mongodb"]["db"],
+        host=CONFIG["mongodb"]["url"],
+        tz_aware=True,
+        uuidRepresentation="standard",
+    )
+    conn.drop_database(CONFIG["mongodb"]["db"])
+
+    insert_mock_data()
 
     yield
+
+    mongoengine.disconnect()
+
+
+@pytest.fixture(scope="function")
+def mock_mongodb():
+    """
+    Prepare a mock MongoDB instance for test usage.
+    This fixture can be used by any test that want some interaction with MongoDB.
+    The MongoDB will contain some mock data for writing unit tests.
+    """
+
+    # run before tests
+
+    CONFIG["mongodb"]["db"] = "gfibot-mock"
+
+    mongoengine.connect(
+        CONFIG["mongodb"]["db"],
+        host="mongomock://localhost",
+        tz_aware=True,
+        uuidRepresentation="standard",
+    )
+
+    insert_mock_data()
+
+    yield
+
+    # run after tests
 
     mongoengine.disconnect()

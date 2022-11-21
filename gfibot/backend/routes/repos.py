@@ -1,7 +1,7 @@
 from typing import List, Optional, Any, Dict
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Response, Depends
+from fastapi import APIRouter, HTTPException, Response, Depends, Header, Query
 
 
 from gfibot.collections import *
@@ -35,7 +35,7 @@ def get_repo_languages():
 
 
 @api.get("/count", response_model=GFIResponse[int])
-def get_repo_count(language: Optional[List[str]] = None):
+def get_repo_count(language: List[str] = Query([])):
     """
     Get number of repositories
     """
@@ -48,7 +48,7 @@ def get_repo_count(language: Optional[List[str]] = None):
 def get_repo_detail_paginated(
     start: int = 0,
     limit: int = 10,
-    language: Optional[List[str]] = None,
+    language: List[str] = Query([]),
     sort: Optional[RepoSort] = None,
 ):
     """
@@ -66,8 +66,6 @@ def get_repo_detail_paginated(
         owner__ne=""
     )  # "": global perf metrics
 
-    assert rank_threshold >= 1, "No training summary found"
-
     if language:
         # TODO: add language field to TrainingSummary (current code might be slow)
         lang_repos = list(
@@ -82,8 +80,6 @@ def get_repo_detail_paginated(
     q = q.order_by(sort.value)
 
     count = q.count()
-
-    print(count, rank_threshold)
 
     q = q.skip(start).limit(limit)  # paginate
     q = q.aggregate(
@@ -128,6 +124,7 @@ def search_repo_detail_paginated(
     query: str,
     start: int = 0,
     limit: int = 10,
+    x_github_login: Optional[str] = Header(None),
 ):
     """
     Search detailed info of repository (paginated)
@@ -175,11 +172,15 @@ def search_repo_detail_paginated(
         },
         {"$project": {k: 1 for k in RepoDetail.__fields__}},
     )
-    repos_list = list(q)
+    repos_list = [RepoDetail(**r) for r in q]
 
     for repo in repos_list:
         s = GfibotSearch(
-            name=repo.name, owner=repo.owner, query=query, searched_at=datetime.now()
+            name=repo.name,
+            owner=repo.owner,
+            query=query,
+            searched_at=datetime.now(),
+            login=x_github_login if x_github_login else "",
         )
         s.save()
 

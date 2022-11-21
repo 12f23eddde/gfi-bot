@@ -122,3 +122,16 @@ db = "gfibot"
 [production.mongodb]
 url = "mongodb://mongo:27020"
 db = "gfibot"
+
+[test]
+[test.gfibot]
+github_graphql_schema_path = "gfibot/data/github_graphql_schema.graphql"
+cache_path=".cache/"
+default_gfi_threshold = 0.5  # default min confidence level for an issue to be considered GFI
+default_newcomer_threshold = 5  # default max # of commits for newcomers
+model_path="models-test/"
+disable_auth = true
+skip_scheduler = true
+[test.mongodb]
+url = "mongodb://localhost:27020"
+db = "gfibot-test"
