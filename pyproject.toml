@@ -45,7 +45,11 @@ gensim = "^4.1.2"
 # Scheduler
 gevent = "^21.12.0"
 APScheduler = "^3.9.1"
-psutil = "^5.9.3"
+psutil = [
+    { version = "^5.9.3", markers="platform_machine!='aarch64'" },
+    { url = "https://github.com/ddelange/psutil/releases/download/3462518385/psutil-5.9.5-cp36-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", markers="platform_machine=='aarch64'" }
+]
+
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2"
