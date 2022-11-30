@@ -93,7 +93,7 @@ def get_user_repo_config(owner: str, name: str):
     gfi_repo: Optional[GfibotRepo] = GfibotRepo.objects(name=name, owner=owner).first()
     if not gfi_repo:
         raise HTTPException(404, f"Repository {owner}/{name} does not exist")
-    return GFIResponse(result=gfi_repo.config)
+    return GFIResponse(result=gfi_repo.config.to_mongo())
 
 
 @api.get(
@@ -131,7 +131,7 @@ def set_user_repo_config(owner: str, name: str, config: UserRepoConfig):
     gfi_repo: Optional[GfibotRepo] = GfibotRepo.objects(name=name, owner=owner).first()
     if not gfi_repo:
         raise HTTPException(404, f"Repository {owner}/{name} does not exist")
-    gfi_repo.update(config=config)
+    gfi_repo.update(config=GfibotRepo.GfibotRepoConfig(**config.dict()))
     gfi_repo.save()
     return GFIResponse(result=f"Repository {owner}/{name}'s config has been updated")
 

@@ -192,7 +192,7 @@ def train_all(
     # load
     use_cache: bool = False,
     random_seed: int = 0,
-    text_features: Union[None, bool, dict] = False,
+    text_features: Union[None, bool, dict] = True,
     drop_insignificant_features: bool = True,
     # split
     split_by: Literal["random", "closed_at", "created_at"] = "created_at",

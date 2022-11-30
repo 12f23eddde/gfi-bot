@@ -214,6 +214,14 @@ def update_repo_prediction(
     if len_open == 0:
         logging.warning("No open issues: %s/%s", owner, name)
 
+    # convert 'closed_at', 'created_at' to datetime
+    df["closed_at"] = (
+        df["closed_at"].astype("object").where(df["closed_at"].notnull(), None)
+    )
+    df["created_at"] = (
+        df["created_at"].astype("object").where(df["created_at"].notnull(), None)
+    )
+
     for i, (idx, row) in enumerate(df.iterrows()):
         _is_open = not row["closed_at"] or pd.isna(row["closed_at"])
         _update_prediction_in_db(

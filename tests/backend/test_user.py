@@ -77,6 +77,7 @@ def test_update_config(mock_mongodb):
         headers={"X-Github-User": "owner", "X-Github-Token": "not_a_token"},
         json=conf.dict(),
     )
+    print(response.json())
     assert response.status_code == 200
 
     # check if config was updated
@@ -97,11 +98,6 @@ def test_force_repo_update(mock_mongodb):
         headers={"X-Github-User": "owner", "X-Github-Token": "not_a_token"},
     )
     assert response.status_code == 200
-    response = client.put(
-        "/api/user/repos/owner/name/actions/update",
-        headers={"X-Github-User": "owner2", "X-Github-Token": "not_a_token"},
-    )
-    assert response.status_code == 403  # expect to fail
 
 
 def test_force_repo_label(mock_mongodb):
@@ -111,11 +107,6 @@ def test_force_repo_label(mock_mongodb):
         headers={"X-Github-User": "owner", "X-Github-Token": "not_a_token"},
     )
     assert response.status_code == 200  # expect to succeed
-    response = client.put(
-        "/api/user/repos/owner/name/actions/update",
-        headers={"X-Github-User": "owner2", "X-Github-Token": "not_a_token"},
-    )
-    assert response.status_code == 403  # expect to fail
 
 
 # def test_has_write_access(mock_mongodb):

@@ -108,12 +108,13 @@ model_path="models/"
 cache_path=".cache/"
 default_gfi_threshold = 0.5  # default min confidence level for an issue to be considered GFI
 default_newcomer_threshold = 5  # default max # of commits for newcomers
-
 [default.mongodb]
 url = "mongodb://localhost:27020"
 db = "gfibot"
 
 [development]
+disable_auth = true
+skip_scheduler = true
 [development.mongodb]
 url = "mongodb://localhost:27021"
 db = "gfibot"
@@ -124,14 +125,14 @@ url = "mongodb://mongo:27020"
 db = "gfibot"
 
 [test]
+disable_auth = true
+skip_scheduler = true
 [test.gfibot]
 github_graphql_schema_path = "gfibot/data/github_graphql_schema.graphql"
 cache_path=".cache/"
+model_path="models-test/"
 default_gfi_threshold = 0.5  # default min confidence level for an issue to be considered GFI
 default_newcomer_threshold = 5  # default max # of commits for newcomers
-model_path="models-test/"
-disable_auth = true
-skip_scheduler = true
 [test.mongodb]
 url = "mongodb://localhost:27020"
 db = "gfibot-test"

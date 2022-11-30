@@ -57,4 +57,9 @@ def test_all(real_mongodb):
         assert data.first().resolver_commit_num >= 0
 
     # Test the new training API
-    train_all()
+    train_all(newcomer_thresholds=[CONFIG["gfibot"]["default_newcomer_threshold"]])
+
+    # Test prediction
+    predict_repo(
+        "Mihara", "RasterPropMonitor", CONFIG["gfibot"]["default_newcomer_threshold"]
+    )

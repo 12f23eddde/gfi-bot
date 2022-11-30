@@ -4,32 +4,27 @@ from typing import Dict, List, Optional, Any, TypeVar
 
 import mongoengine
 import mongoengine.context_managers
+from dynaconf import settings
 
 from datetime import datetime, timezone
 from gfibot import CONFIG, TOKENS
 from gfibot.check_tokens import check_tokens
 from gfibot.collections import *
 from gfibot.data.dataset import *
-import gfibot.model.base
 
 
 @pytest.fixture(scope="session", autouse=True)
 def execute_before_any_test():
     check_tokens(TOKENS)
 
-    # Ensure that the production database is not touched in all tests
-    CONFIG["mongodb"]["db"] = "gfibot-test"
-    mongoengine.disconnect_all()
-    gfibot.model.base.GFIBOT_MODEL_PATH = "models-test"
-    os.makedirs("models-test", exist_ok=True)
-
-    # don't start scheduler in tests
-    os.environ["GFIBOT_SKIP_SCHEDULER"] = "1"
     # limit since_date in tests
     os.environ["CI"] = "1"
-    # don't authenticate in tests
-    os.environ["GFIBOT_DISABLE_AUTH"] = "1"
-    os.environ["GFIBOT_ENV"] = "test"
+    # use test settings
+    settings.configure(FORCE_ENV_FOR_DYNACONF="test")
+
+    # Ensure that the production database is not touched in all tests
+    mongoengine.disconnect_all()
+    os.makedirs("models-test", exist_ok=True)
 
 
 # Mocked mongodb data
@@ -502,6 +497,7 @@ MONGOMOCK_DATA: Dict[Document.__class__, List[Document]] = {
                 newcomer_threshold=CONFIG["gfibot"]["default_newcomer_threshold"],
                 gfi_threshold=CONFIG["gfibot"]["default_gfi_threshold"],
             ),
+            installation_id=1,
         )
     ],
 }
