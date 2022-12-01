@@ -182,10 +182,11 @@ def get_user_search_queries(limit: int = 5, x_github_user: str = Header()):
         GfibotSearch.objects(login=user)
         .order_by("-searched_at")
         .distinct(field="query")
-        .only("query")
-        .limit(limit)
     )
-    recent_queries = [r.query for r in recent_queries]
+    if limit:
+        recent_queries = recent_queries[:limit]
+    else:
+        recent_queries = list(recent_queries)
     return GFIResponse(result=recent_queries)
 
 
@@ -204,5 +205,33 @@ def get_user_search_repos(limit: int = 10, x_github_user: str = Header()):
     recent_repos = (
         GfibotSearch.objects(login=user).order_by("-searched_at").limit(limit)
     )
-    recent_repos = list(recent_repos)
+    recent_repos = [
+        UserSearchedRepo(
+            id=str(r.id),
+            owner=r.owner,
+            name=r.name,
+            query=r.query,
+            searched_at=r.searched_at,
+        )
+        for r in recent_repos
+    ]
     return GFIResponse(result=recent_repos)
+
+
+@api.delete(
+    "/history",
+    response_model=GFIResponse[str],
+    dependencies=[Depends(check_token_headers)],
+)
+def delete_user_search_history(x_github_user: str = Header(), id: Optional[str] = None):
+    """
+    Delete user's search history
+    """
+    user = x_github_user
+    if not user:
+        raise HTTPException(401, "Unauthorized: check X-Github-User header")
+    if id:
+        GfibotSearch.objects(login=user, id=id).delete()
+    else:
+        GfibotSearch.objects(login=user).delete()
+    return GFIResponse(result=f"User {user}'s search history deleted")

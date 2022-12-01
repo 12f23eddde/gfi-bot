@@ -109,6 +109,44 @@ def test_force_repo_label(mock_mongodb):
     assert response.status_code == 200  # expect to succeed
 
 
+def test_get_queries(mock_mongodb):
+    client = TestClient(app)
+    response = client.get(
+        "/api/user/searches",
+        headers={"X-Github-User": "owner", "X-Github-Token": "not_a_token"},
+    )
+    assert response.status_code == 200
+    res = GFIResponse[List[str]].parse_obj(response.json())
+    assert len(res.result) > 0
+
+
+def test_get_delete_history(mock_mongodb):
+    client = TestClient(app)
+    response = client.get(
+        "/api/user/history",
+        headers={"X-Github-User": "owner", "X-Github-Token": "not_a_token"},
+    )
+    print(response.json())
+    assert response.status_code == 200
+    res = GFIResponse[List[UserSearchedRepo]].parse_obj(response.json())
+    assert len(res.result) > 0
+    first = res.result[0]
+    response = client.delete(
+        "/api/user/history",
+        params={"id": first.id},
+        headers={"X-Github-User": "owner", "X-Github-Token": "not_a_token"},
+    )
+    assert response.status_code == 200
+    response = client.get(
+        "/api/user/history",
+        headers={"X-Github-User": "owner", "X-Github-Token": "not_a_token"},
+    )
+    print(response.json())
+    assert response.status_code == 200
+    res = GFIResponse[List[UserSearchedRepo]].parse_obj(response.json())
+    assert len(res.result) == 0
+
+
 # def test_has_write_access(mock_mongodb):
 #     assert has_write_access(owner="owner", name="name", user="chuchu")
 #     assert not has_write_access(owner="owner", name="name", user="nobody")

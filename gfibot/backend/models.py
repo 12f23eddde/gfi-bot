@@ -83,6 +83,7 @@ class RepoSort(Enum):
 
 
 class UserSearchedRepo(BaseModel):
+    id: str
     name: str
     owner: str
     query: str
