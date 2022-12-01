@@ -113,7 +113,7 @@ class UserSearchedRepo(BaseModel):
 class UserRepo(BaseModel):
     owner: str
     name: str
-    state: Literal["done", "collecting", "trainning", "error"]
+    state: Literal["done", "collecting", "training", "error"]
 
 
 class UserRepoConfig(BaseModel):
